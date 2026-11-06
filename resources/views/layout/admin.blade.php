@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="id">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>@yield('judul', 'WeCare')</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ asset('css/wecare.css') }}" rel="stylesheet">
+</head>
+
+<body>
+
+    <div class="d-flex">
+        <aside class="wc-sidebar p-3" style="width: 250px; flex-shrink: 0;">
+            <a href="{{ route('admin.dashboard') }}" class="wc-brand d-block mb-4 px-2">
+                <img src="{{ asset('img/mascot/duck-heart.png') }}" alt="Maskot WeCare">
+                WeCare
+            </a>
+            <div class="small text-uppercase text-secondary fw-bold px-2 mb-2">Admin WeCare</div>
+            <ul class="nav nav-pills flex-column mb-4">
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.dashboard*') ? 'active' : '' }}" href="{{ route('admin.dashboard') }}">
+                        <i class="bi bi-grid me-2"></i>Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.verifikasi-mitra*') ? 'active' : '' }}" href="{{ route('admin.verifikasi-mitra') }}">
+                        <i class="bi bi-patch-check me-2"></i>Verifikasi Mitra
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.approve-campaign*') ? 'active' : '' }}" href="{{ route('admin.approve-campaign') }}">
+                        <i class="bi bi-megaphone me-2"></i>Approve Campaign
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.kategori*') ? 'active' : '' }}" href="{{ route('admin.kategori') }}">
+                        <i class="bi bi-tags me-2"></i>Kelola Kategori
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.monitoring-donasi*') ? 'active' : '' }}" href="{{ route('admin.monitoring-donasi') }}">
+                        <i class="bi bi-bar-chart me-2"></i>Monitoring Donasi
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.user*') ? 'active' : '' }}" href="{{ route('admin.user') }}">
+                        <i class="bi bi-people me-2"></i>Kelola User
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.broadcast*') ? 'active' : '' }}" href="{{ route('admin.broadcast') }}">
+                        <i class="bi bi-megaphone-fill me-2"></i>Broadcast Notifikasi
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.settings*') ? 'active' : '' }}" href="{{ route('admin.settings') }}">
+                        <i class="bi bi-gear me-2"></i>Settings
+                    </a>
+                </li>
+            </ul>
+            <div class="px-2">
+                <form method="POST" action="{{ route('logout') }}">
+                    @csrf
+                    <button class="nav-link text-danger border-0 bg-transparent w-100 text-start" type="submit">
+                        <i class="bi bi-box-arrow-right me-2"></i>Keluar
+                    </button>
+                </form>
+            </div>
+        </aside>
+
+        <div class="flex-grow-1">
+            <nav class="wc-navbar px-4 py-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold">@yield('judul', 'Admin WeCare')</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi bi-person-circle fs-4 text-secondary"></i>
+                    <span class="fw-semibold">{{ getAuthUser() ? getAuthUser()->name : 'Admin WeCare' }}</span>
+                </div>
+            </nav>
+            <main class="container-fluid p-4">
+                @yield('konten')
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>
