@@ -12,9 +12,16 @@
                         <h4 class="fw-bold mt-3">Buat Password Baru</h4>
                     </div>
 
+                    @if (session('pesan'))
+                        <div class="alert alert-info small">
+                            {{ session('pesan') }}
+                        </div>
+                    @endif
+
                     <form method="POST" action="{{ route('password.update') }}">
                         @csrf
                         <input type="hidden" name="token" value="{{ $token ?? '' }}">
+                        <input type="hidden" name="email" value="{{ $email ?? '' }}">
                         <div class="mb-3">
                             <label class="form-label fw-semibold">Password Baru</label>
                             <input type="password" name="password" class="form-control" required>
