@@ -11,6 +11,12 @@
                     <h4 class="fw-bold mt-3">Lupa Password?</h4>
                     <p class="text-secondary small mb-4">Masukkan email kamu, kami akan kirim link reset password.</p>
 
+                    @if (session('pesan'))
+                        <div class="alert alert-info small text-start">
+                            {{ session('pesan') }}
+                        </div>
+                    @endif
+
                     <form method="POST" action="{{ route('password.request') }}" class="text-start">
                         @csrf
                         <div class="mb-4">

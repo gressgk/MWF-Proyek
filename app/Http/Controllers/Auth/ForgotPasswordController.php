@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Password;
 
 class ForgotPasswordController extends Controller
 {
@@ -12,7 +14,18 @@ class ForgotPasswordController extends Controller
         return view('auth.forgot-password');
     }
 
-    public function kirimLink() {
-        
+    public function kirimLink(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $status = Password::sendResetLink($request->only('email'));
+
+        if ($status == Password::RESET_LINK_SENT) {
+            return back()->with('pesan', 'Link reset password sudah dikirim, cek email kamu');
+        }
+
+        return back()->with('pesan', 'Email tidak ditemukan di sistem kami');
     }
 }
