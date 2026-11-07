@@ -9,6 +9,10 @@ class ForgotPasswordController extends Controller
     public function index()
     {
 
-        return view('auth.forgot-password', compact());
+        return view('auth.forgot-password');
+    }
+
+    public function kirimLink() {
+        
     }
 }

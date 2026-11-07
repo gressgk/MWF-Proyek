@@ -41,8 +41,7 @@ Route::prefix('auth')->group(function () {
     Route::post('register', [RegisterDonaturController::class, 'store']);
 
     Route::get('register-mitra', [RegisterMitraController::class, 'index'])->name('register.mitra');
-    Route::post('register-mitra/akun', [RegisterMitraController::class, 'simpanAkun']);
-    Route::post('register-mitra/organisasi', [RegisterMitraController::class, 'simpanOrganisasi']);
+    Route::post('register-mitra', [RegisterMitraController::class, 'store'])->name('register.mitra.store');
 
     Route::get('login', [LoginController::class, 'index'])->name('login');
     Route::post('login', [LoginController::class, 'doLogin']);
@@ -112,6 +111,7 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
     Route::get('verifikasi-mitra', [VerifikasiMitraController::class, 'index'])->name('verifikasi-mitra');
     Route::put('verifikasi-mitra/{user}/approve', [VerifikasiMitraController::class, 'approve']);
     Route::put('verifikasi-mitra/{user}/reject', [VerifikasiMitraController::class, 'reject']);
+    Route::get('verifikasi-mitra/dokumen', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
 
     Route::get('approve-campaign', [ApproveCampaignController::class, 'index'])->name('approve-campaign');
     Route::put('approve-campaign/{campaign}/approve', [ApproveCampaignController::class, 'approve']);

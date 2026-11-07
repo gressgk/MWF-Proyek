@@ -13,16 +13,24 @@
                         <p class="text-secondary small">Dua langkah mudah sebelum akun diverifikasi Admin</p>
                     </div>
 
+                    @if (session('pesan'))
+                        <div class="alert alert-info small">
+                            {{ session('pesan') }}
+                        </div>
+                    @endif
+
                     <ul class="nav nav-pills justify-content-center gap-2 mb-4" id="stepTab">
                         <li class="nav-item">
-                            <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#step1" type="button">1. Data Akun</button>
+                            <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#step1" type="button">1.
+                                Data Akun</button>
                         </li>
                         <li class="nav-item">
-                            <button class="nav-link" data-bs-toggle="pill" data-bs-target="#step2" type="button">2. Data Organisasi</button>
+                            <button class="nav-link" data-bs-toggle="pill" data-bs-target="#step2" type="button">2. Data
+                                Organisasi</button>
                         </li>
                     </ul>
 
-                    <form method="POST" action="{{ route('register.mitra') }}" enctype="multipart/form-data">
+                    <form method="POST" action="{{ route('register.mitra.store') }}" enctype="multipart/form-data">
                         @csrf
                         <div class="tab-content">
                             <div class="tab-pane fade show active" id="step1">
@@ -42,7 +50,9 @@
                                     <label class="form-label fw-semibold">Password</label>
                                     <input type="password" name="password" class="form-control" required>
                                 </div>
-                                <button type="button" class="wc-btn-primary w-100" onclick="document.querySelector('[data-bs-target=\'#step2\']').click()">Lanjut ke Data Organisasi</button>
+                                <button type="button" class="wc-btn-primary w-100"
+                                    onclick="document.querySelector('[data-bs-target=\'#step2\']').click()">Lanjut ke Data
+                                    Organisasi</button>
                             </div>
 
                             <div class="tab-pane fade" id="step2">
@@ -52,7 +62,7 @@
                                 </div>
                                 <div class="mb-3">
                                     <label class="form-label fw-semibold">Jenis Organisasi</label>
-                                    <select name="jenis_organisasi" class="form-select" required>
+                                    <select name="jenis_organisasi" id="jenisOrganisasi" class="form-select" required>
                                         <option value="yayasan">Yayasan</option>
                                         <option value="individu">Individu</option>
                                         <option value="komunitas">Komunitas</option>
@@ -70,9 +80,11 @@
                                     <label class="form-label fw-semibold">Upload KTP Penanggung Jawab</label>
                                     <input type="file" name="dokumen_ktp" class="form-control" required>
                                 </div>
-                                <div class="mb-4">
-                                    <label class="form-label fw-semibold">Upload SK Yayasan / Akta (opsional)</label>
-                                    <input type="file" name="dokumen_legalitas" class="form-control">
+                                <div class="mb-4" id="wrapDokumenLegalitas">
+                                    <label class="form-label fw-semibold" id="labelDokumenLegalitas">Upload SK
+                                        Yayasan</label>
+                                    <input type="file" name="dokumen_legalitas" id="inputDokumenLegalitas"
+                                        class="form-control" required>
                                 </div>
                                 <button type="submit" class="wc-btn-primary w-100">Daftar & Kirim untuk Verifikasi</button>
                             </div>
@@ -86,4 +98,29 @@
             </div>
         </div>
     </section>
+
+    <script>
+        const jenisOrganisasi = document.getElementById('jenisOrganisasi');
+        const wrapDokumenLegalitas = document.getElementById('wrapDokumenLegalitas');
+        const labelDokumenLegalitas = document.getElementById('labelDokumenLegalitas');
+        const inputDokumenLegalitas = document.getElementById('inputDokumenLegalitas');
+
+        function toggleDokumenLegalitas() {
+            if (jenisOrganisasi.value == 'individu') {
+                wrapDokumenLegalitas.style.display = 'none';
+                inputDokumenLegalitas.required = false;
+            } else if (jenisOrganisasi.value == 'yayasan') {
+                wrapDokumenLegalitas.style.display = 'block';
+                labelDokumenLegalitas.innerText = 'Upload SK Yayasan (wajib)';
+                inputDokumenLegalitas.required = true;
+            } else {
+                wrapDokumenLegalitas.style.display = 'block';
+                labelDokumenLegalitas.innerText = 'Upload SK Organisasi (opsional)';
+                inputDokumenLegalitas.required = false;
+            }
+        }
+
+        jenisOrganisasi.addEventListener('change', toggleDokumenLegalitas);
+        toggleDokumenLegalitas();
+    </script>
 @endsection

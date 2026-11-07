@@ -10,7 +10,7 @@
     <link href="<?php echo e(asset('css/wecare.css')); ?>" rel="stylesheet">
 </head>
 
-<body>
+<body class="d-flex flex-column min-vh-100">
 
     <nav class="navbar navbar-expand-lg wc-navbar py-3">
         <div class="container">
@@ -30,7 +30,7 @@
         </div>
     </nav>
 
-    <main>
+    <main class="flex-grow-1">
         <?php echo $__env->yieldContent('konten'); ?>
     </main>
 

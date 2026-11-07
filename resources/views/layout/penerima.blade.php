@@ -21,47 +21,51 @@
             <div class="small text-uppercase text-secondary fw-bold px-2 mb-2">Mitra WeCare</div>
             <ul class="nav nav-pills flex-column mb-4">
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('mitra.dashboard*') ? 'active' : '' }}" href="{{ route('mitra.dashboard') }}">
+                    <a class="nav-link {{ request()->routeIs('mitra.dashboard*') ? 'active' : '' }}"
+                        href="{{ route('mitra.dashboard') }}">
                         <i class="bi bi-grid me-2"></i>Dashboard
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('mitra.campaign.index*') ? 'active' : '' }}" href="{{ route('mitra.campaign.index') }}">
+                    <a class="nav-link {{ request()->routeIs('mitra.campaign.index*') ? 'active' : '' }}"
+                        href="{{ route('mitra.campaign.index') }}">
                         <i class="bi bi-megaphone me-2"></i>Campaign Saya
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('mitra.donasi-masuk*') ? 'active' : '' }}" href="{{ route('mitra.donasi-masuk') }}">
+                    <a class="nav-link {{ request()->routeIs('mitra.donasi-masuk*') ? 'active' : '' }}"
+                        href="{{ route('mitra.donasi-masuk') }}">
                         <i class="bi bi-inbox me-2"></i>Donasi Masuk
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('mitra.laporan*') ? 'active' : '' }}" href="{{ route('mitra.laporan') }}">
+                    <a class="nav-link {{ request()->routeIs('mitra.laporan*') ? 'active' : '' }}"
+                        href="{{ route('mitra.laporan') }}">
                         <i class="bi bi-file-earmark-text me-2"></i>Laporan Penggunaan
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('mitra.chat*') ? 'active' : '' }}" href="{{ route('mitra.chat') }}">
+                    <a class="nav-link {{ request()->routeIs('mitra.chat*') ? 'active' : '' }}"
+                        href="{{ route('mitra.chat') }}">
                         <i class="bi bi-chat-dots me-2"></i>Chat
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('mitra.settings*') ? 'active' : '' }}" href="{{ route('mitra.settings') }}">
+                    <a class="nav-link {{ request()->routeIs('mitra.settings*') ? 'active' : '' }}"
+                        href="{{ route('mitra.settings') }}">
                         <i class="bi bi-gear me-2"></i>Settings
                     </a>
                 </li>
             </ul>
-            <div class="px-2">
-                <form method="POST" action="{{ route('logout') }}">
-                    @csrf
-                    <button class="nav-link text-danger border-0 bg-transparent w-100 text-start" type="submit">
-                        <i class="bi bi-box-arrow-right me-2"></i>Keluar
-                    </button>
-                </form>
-            </div>
+            <form method="POST" action="{{ route('logout') }}">
+                @csrf
+                <button class="nav-link text-danger border-0 bg-transparent w-100 text-start" type="submit">
+                    <i class="bi bi-box-arrow-right me-2"></i>Keluar
+                </button>
+            </form>
         </aside>
 
-        <div class="flex-grow-1">
+        <div class="flex-grow-1 d-flex flex-column min-vh-100">
             <nav class="wc-navbar px-4 py-3 d-flex justify-content-between align-items-center">
                 <h5 class="mb-0 fw-bold">@yield('judul', 'Mitra WeCare')</h5>
                 <div class="d-flex align-items-center gap-2">
@@ -69,9 +73,19 @@
                     <span class="fw-semibold">{{ getAuthUser() ? getAuthUser()->name : 'Mitra WeCare' }}</span>
                 </div>
             </nav>
-            <main class="container-fluid p-4">
+            <main class="container-fluid p-4 flex-grow-1">
                 @yield('konten')
             </main>
+            <footer class="wc-footer py-3 px-4">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-center gap-2 small">
+                    <span>&copy; {{ date('Y') }} WeCare. Berbagi kebaikan, bersama.</span>
+                    <div class="d-flex gap-3">
+                        <a href="#">Tentang</a>
+                        <a href="#">Bantuan</a>
+                        <a href="#">Kontak</a>
+                    </div>
+                </div>
+            </footer>
         </div>
     </div>
 

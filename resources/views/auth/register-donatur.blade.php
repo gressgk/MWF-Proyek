@@ -8,7 +8,7 @@
             <div class="col-md-7 col-lg-6">
                 <div class="wc-card p-4 p-md-5">
                     <div class="text-center mb-4">
-                        <img src="{{ asset('img/mascot/duck-gift.png') }}" style="height: 70px;" alt="Maskot WeCare">
+                        <img src="{{ asset('img/mascot/duck-box.png') }}" style="height: 70px;" alt="Maskot WeCare">
                         <h4 class="fw-bold mt-3">Daftar Sebagai Donatur</h4>
                         <p class="text-secondary small">Mulai perjalanan berbagimu bersama WeCare</p>
                     </div>
