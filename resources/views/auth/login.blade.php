@@ -13,6 +13,12 @@
                         <p class="text-secondary small">Masuk untuk lanjut berbagi kebaikan</p>
                     </div>
 
+                    @if (session('pesan'))
+                        <div class="alert alert-info small">
+                            {{ session('pesan') }}
+                        </div>
+                    @endif
+
                     <form method="POST" action="{{ route('login') }}">
                         @csrf
                         <div class="mb-3">

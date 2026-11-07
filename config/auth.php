@@ -43,11 +43,7 @@ return [
         'web' => [
             'driver' => 'session',
             'provider' => 'users',
-        ],
-        'satpam_supplier' => [
-            'driver' => 'session',
-            'provider' => 'supplier',
-        ],
+        ]
     ],
 
     /*
@@ -71,12 +67,7 @@ return [
         'users' => [
             'driver' => 'eloquent',
             // 'model' => env('AUTH_MODEL', Users::class),
-            'model' => Users::class
-        ],
-        'supplier' => [
-            'driver' => 'eloquent',
-            // 'model' => env('AUTH_MODEL', Users::class),
-            'model' => Supplier::class
+            'model' => User::class
         ],
 
         // 'users' => [

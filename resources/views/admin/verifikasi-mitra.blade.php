@@ -19,12 +19,19 @@
                     <p class="small mb-1"><i class="bi bi-geo-alt me-1"></i>{{ $mitra->PenerimaProfile->alamat ?? '-' }}</p>
                     <p class="small mb-3">
                         <i class="bi bi-file-earmark-text me-1"></i>
-                        <a href="#">Lihat dokumen KTP</a> &middot;
-                        <a href="#">Lihat dokumen legalitas</a>
+                        <a
+                            href="{{ route('admin.verifikasi-mitra.dokumen', ['path' => $mitra->PenerimaProfile->dokumen_ktp ?? '']) }}">Lihat
+                            dokumen KTP</a>
+                        @if ($mitra->PenerimaProfile->dokumen_legalitas ?? false)
+                            &middot; <a
+                                href="{{ route('admin.verifikasi-mitra.dokumen', ['path' => $mitra->PenerimaProfile->dokumen_legalitas]) }}">Lihat
+                                dokumen legalitas</a>
+                        @endif
                     </p>
                     <div class="d-flex gap-2">
                         <button class="btn btn-sm wc-btn-primary">Approve</button>
-                        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#reject{{ $mitra->id }}">Reject</button>
+                        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                            data-bs-target="#reject{{ $mitra->id }}">Reject</button>
                     </div>
                 </div>
             </div>
@@ -61,11 +68,14 @@
                         <td>{{ $mitra->PenerimaProfile->nama_organisasi ?? '-' }}</td>
                         <td>{{ $mitra->name }}</td>
                         <td>
-                            <span class="badge text-bg-{{ $mitra->status_verifikasi == 'approved' ? 'success' : 'danger' }}">{{ ucfirst($mitra->status_verifikasi) }}</span>
+                            <span
+                                class="badge text-bg-{{ $mitra->status_verifikasi == 'approved' ? 'success' : 'danger' }}">{{ ucfirst($mitra->status_verifikasi) }}</span>
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="3" class="text-center text-secondary py-3">Belum ada data.</td></tr>
+                    <tr>
+                        <td colspan="3" class="text-center text-secondary py-3">Belum ada data.</td>
+                    </tr>
                 @endforelse
             </tbody>
         </table>
