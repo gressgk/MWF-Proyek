@@ -15,11 +15,29 @@
                     </div>
                 </div>
 
-                <form method="POST" action="{{ route('donatur.donasi.barang', $campaign->slug) }}" enctype="multipart/form-data">
+                @if ($errors->any())
+                    <div class="alert alert-danger">
+                        <strong>Please check the following errors:</strong>
+                        <ul class="mb-0 mt-2">
+                            @foreach ($errors->all() as $error)
+                                <li>{{ $error }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+
+                @if (session('success'))
+                    <div class="alert alert-success">
+                        {{ session('success') }}
+                    </div>
+                @endif
+                <form method="POST" action="{{ route('donatur.donasi.barang', $campaign->slug) }}"
+                    enctype="multipart/form-data">
                     @csrf
                     <div class="mb-3">
                         <label class="form-label fw-semibold">Nama Barang</label>
-                        <input type="text" name="nama_barang" class="form-control" placeholder="Contoh: Selimut, buku tulis, dll" required>
+                        <input type="text" name="nama_barang" class="form-control"
+                            placeholder="Contoh: Selimut, buku tulis, dll" required>
                     </div>
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -49,23 +67,27 @@
                     </div>
 
                     <div class="form-check mb-4">
-                        <input class="form-check-input" type="checkbox" name="is_anonim" id="anonimBarang">
+                        <input type="checkbox" name="is_anonim" id="anonimBarang" value="1">
                         <label class="form-check-label" for="anonimBarang">Donasi sebagai anonim</label>
                     </div>
 
                     <div class="wc-card p-3 mb-4 bg-light border-0" style="background-color: #FDF8F2 !important;">
                         <p class="small fw-semibold mb-2"><i class="bi bi-truck me-1"></i> Estimasi Ongkir (Komship)</p>
-                        <p class="small text-secondary mb-0">Rp25.000 - Rp45.000 tergantung kota asal & ekspedisi yang dipilih.</p>
+                        <p class="small text-secondary mb-0">Rp25.000 - Rp45.000 tergantung kota asal & ekspedisi yang
+                            dipilih.</p>
                     </div>
 
                     <label class="form-label fw-semibold">Metode Pengiriman</label>
                     <div class="mb-3">
                         <div class="form-check">
-                            <input class="form-check-input" type="radio" name="metode_pengiriman" id="kirimSendiri" value="dikirim_sendiri" checked data-bs-toggle="collapse" data-bs-target="#resiBox">
-                            <label class="form-check-label" for="kirimSendiri">Dikirim sendiri (isi ekspedisi & no. resi)</label>
+                            <input class="form-check-input" type="radio" name="metode_pengiriman" id="kirimSendiri"
+                                value="dikirim_sendiri" checked data-bs-toggle="collapse" data-bs-target="#resiBox">
+                            <label class="form-check-label" for="kirimSendiri">Dikirim sendiri (isi ekspedisi & no.
+                                resi)</label>
                         </div>
                         <div class="form-check">
-                            <input class="form-check-input" type="radio" name="metode_pengiriman" id="diantarLangsung" value="diantar_langsung">
+                            <input class="form-check-input" type="radio" name="metode_pengiriman" id="diantarLangsung"
+                                value="diantar_langsung">
                             <label class="form-check-label" for="diantarLangsung">Diantar langsung</label>
                         </div>
                     </div>

@@ -18,9 +18,21 @@
                     <p class="small text-secondary mb-3">oleh <?php echo e($campaign->Penerima->name ?? '-'); ?></p>
                     <p class="small mb-3"><?php echo e(\Illuminate\Support\Str::limit($campaign->deskripsi, 120)); ?></p>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-sm wc-btn-primary">Approve</button>
-                        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#rejectC<?php echo e($campaign->id); ?>">Reject</button>
-                        <a href="#" class="btn btn-sm btn-light border">Preview</a>
+                        <form action="<?php echo e(url('admin/approve-campaign/' . $campaign->id . '/approve')); ?>" method="POST"
+                            class="d-inline">
+                            <?php echo csrf_field(); ?>
+                            <?php echo method_field('PUT'); ?>
+
+                            <button type="submit" class="btn btn-sm wc-btn-primary">
+                                Approve
+                            </button>
+                        </form>
+                        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                            data-bs-target="#rejectC<?php echo e($campaign->id); ?>">Reject</button>
+                        <a href="<?php echo e(route('donatur.campaign.show', $campaign->slug)); ?>" target="_blank"
+                            class="btn btn-sm btn-light border">
+                            Preview
+                        </a>
                     </div>
                 </div>
             </div>
@@ -30,8 +42,18 @@
                     <div class="modal-content">
                         <div class="modal-body p-4">
                             <h6 class="fw-bold mb-3">Alasan Penolakan Campaign</h6>
-                            <textarea class="form-control mb-3" rows="3"></textarea>
-                            <button class="btn btn-danger w-100">Tolak Campaign</button>
+
+                            <form action="<?php echo e(url('admin/approve-campaign/' . $campaign->id . '/reject')); ?>" method="POST">
+                                <?php echo csrf_field(); ?>
+                                <?php echo method_field('PUT'); ?>
+
+                                <textarea name="alasan_ditolak" class="form-control mb-3" rows="3"
+                                    placeholder="Jelaskan alasan penolakan campaign..." required></textarea>
+
+                                <button type="submit" class="btn btn-danger w-100">
+                                    Tolak Campaign
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>

@@ -60,7 +60,7 @@
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label fw-semibold">Tipe Bantuan</label>
-                    <select name="tipe_bantuan" class="form-select" required>
+                    <select name="tipe_bantuan" class="form-select" onchange="toggleTargetFields(this.value)" required>
                         <option value="uang"
                             <?php echo e(old('tipe_bantuan', $campaign->tipe_bantuan ?? '') === 'uang' ? 'selected' : ''); ?>>
                             Uang
@@ -81,29 +81,29 @@
                 $selectedTipe = old('tipe_bantuan', $campaign->tipe_bantuan ?? 'uang');
             ?>
 
-            <?php if($selectedTipe === 'uang' || $selectedTipe === 'keduanya'): ?>
+            <div id="targetNominalField" class="<?php echo e(in_array($selectedTipe, ['uang', 'keduanya']) ? '' : 'd-none'); ?>">
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Target Nominal</label>
                     <input type="number" name="target_nominal" class="form-control" placeholder="Rp" min="1"
-                        value="<?php echo e(old('target_nominal', $campaign->target_nominal ?? '')); ?>" required>
+                        value="<?php echo e(old('target_nominal', $campaign->target_nominal ?? '')); ?>">
                 </div>
-            <?php endif; ?>
+            </div>
 
-            <?php if($selectedTipe === 'barang' || $selectedTipe === 'keduanya'): ?>
+            <div id="targetBarangFields" class="<?php echo e(in_array($selectedTipe, ['barang', 'keduanya']) ? '' : 'd-none'); ?>">
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label class="form-label fw-semibold">Target Barang</label>
                         <input type="number" name="target_barang" class="form-control" placeholder="Jumlah" min="1"
-                            value="<?php echo e(old('target_barang', $campaign->target_barang ?? '')); ?>" required>
+                            value="<?php echo e(old('target_barang', $campaign->target_barang ?? '')); ?>">
                     </div>
 
                     <div class="col-md-6 mb-3">
                         <label class="form-label fw-semibold">Satuan</label>
                         <input type="text" name="satuan_barang" class="form-control" placeholder="pcs / paket / dus"
-                            value="<?php echo e(old('satuan_barang', $campaign->satuan_barang ?? '')); ?>" required>
+                            value="<?php echo e(old('satuan_barang', $campaign->satuan_barang ?? '')); ?>">
                     </div>
                 </div>
-            <?php endif; ?>
+            </div>
 
             <div class="row">
                 <div class="col-md-4 mb-3">
@@ -161,6 +161,21 @@
         document.getElementById('kategoriSelect').addEventListener('change', function() {
             document.getElementById('kategoriLainnya').classList.toggle('d-none', this.value !== 'lainnya');
         });
+
+        function toggleTargetFields(tipe) {
+            const targetNominal = document.getElementById('targetNominalField');
+            const targetBarang = document.getElementById('targetBarangFields');
+
+            targetNominal.classList.toggle(
+                'd-none',
+                tipe !== 'uang' && tipe !== 'keduanya'
+            );
+
+            targetBarang.classList.toggle(
+                'd-none',
+                tipe !== 'barang' && tipe !== 'keduanya'
+            );
+        }
     </script>
 
 <?php $__env->stopSection(); ?>

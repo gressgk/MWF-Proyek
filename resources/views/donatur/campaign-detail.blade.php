@@ -7,34 +7,69 @@
     <div class="row g-4">
         <div class="col-lg-8">
             <div class="wc-card overflow-hidden mb-4">
-                <div style="height: 260px; background: linear-gradient(135deg, #FBDCD3, #FDEFD9);" class="d-flex align-items-center justify-content-center">
+                <div style="height: 260px; background: linear-gradient(135deg, #FBDCD3, #FDEFD9);"
+                    class="d-flex align-items-center justify-content-center">
                     <i class="bi bi-heart-fill text-white" style="font-size: 4rem;"></i>
                 </div>
                 <div class="p-4">
                     <div class="d-flex gap-2 mb-3">
                         <span class="wc-badge wc-badge-{{ $campaign->urgensi }}">{{ ucfirst($campaign->urgensi) }}</span>
-                        <span class="wc-badge wc-badge-biasa">{{ $campaign->Category->nama ?? $campaign->kategori_lainnya }}</span>
+                        <span
+                            class="wc-badge wc-badge-biasa">{{ $campaign->Category->nama ?? $campaign->kategori_lainnya }}</span>
                     </div>
                     <h3 class="fw-bold mb-2">{{ $campaign->judul }}</h3>
                     <p class="text-secondary mb-4">
-                        oleh <strong>{{ $campaign->Penerima->PenerimaProfile->nama_organisasi ?? $campaign->Penerima->name }}</strong>
-                        &middot; berlangsung sampai {{ \Illuminate\Support\Carbon::parse($campaign->tanggal_selesai)->translatedFormat('d F Y') }}
+                        oleh
+                        <strong>{{ $campaign->Penerima->PenerimaProfile->nama_organisasi ?? $campaign->Penerima->name }}</strong>
+                        &middot; berlangsung sampai
+                        {{ \Illuminate\Support\Carbon::parse($campaign->tanggal_selesai)->translatedFormat('d F Y') }}
                     </p>
                     <p style="white-space: pre-line;">{{ $campaign->deskripsi }}</p>
                 </div>
             </div>
 
+
             <div class="wc-card p-4 mb-4">
-                <h5 class="fw-bold mb-3"><i class="bi bi-file-earmark-text me-2"></i>Update Laporan Penggunaan</h5>
+                <h5 class="fw-bold mb-3">
+                    <i class="bi bi-file-earmark-text me-2"></i>
+                    Transparency Reports
+                </h5>
+
                 @forelse ($campaign->Reports as $laporan)
-                    <div class="border-bottom pb-3 mb-3">
-                        <p class="fw-semibold mb-1">{{ $laporan->judul }}</p>
-                        <p class="small text-secondary mb-0">{{ $laporan->isi }}</p>
-                    </div>
+                    <a href="{{ route('donatur.campaign.report.show', [
+                        'campaign' => $campaign->slug,
+                        'report' => $laporan->id,
+                    ]) }}"
+                        class="text-decoration-none text-dark">
+
+                        <div class="border-bottom pb-3 mb-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <p class="fw-semibold mb-1">{{ $laporan->judul }}</p>
+                                <i class="bi bi-chevron-right text-muted"></i>
+                            </div>
+
+                            <p class="small text-muted mb-2">
+                                <i class="bi bi-calendar me-1"></i>
+                                {{ $laporan->created_at->format('d M Y') }}
+                            </p>
+
+                            <p class="small text-secondary mb-2">
+                                {{ \Illuminate\Support\Str::limit($laporan->isi, 120) }}
+                            </p>
+
+                            <span class="small text-primary">
+                                <i class="bi bi-paperclip me-1"></i>
+                                View report details
+                            </span>
+                        </div>
+                    </a>
                 @empty
-                    <p class="text-secondary small mb-0">Belum ada update laporan dari penerima.</p>
+                    <p class="text-secondary small mb-0">
+                        No transparency reports have been published yet.
+                    </p>
                 @endforelse
             </div>
+
 
             <div class="wc-card p-4">
                 <h5 class="fw-bold mb-3"><i class="bi bi-people me-2"></i>Donatur Terbaru</h5>
@@ -58,13 +93,20 @@
         <div class="col-lg-4">
             <div class="wc-card p-4 mb-3" style="position: sticky; top: 90px;">
                 @if ($campaign->tipe_bantuan != 'barang')
-                    <div class="wc-progress mb-2"><div style="width: {{ $campaign->progres_persen }}%"></div></div>
+                    <div class="wc-progress mb-2">
+                        <div style="width: {{ $campaign->progres_persen }}%"></div>
+                    </div>
                     <p class="mb-1"><strong>Rp{{ number_format($campaign->terkumpul_nominal, 0, ',', '.') }}</strong></p>
-                    <p class="small text-secondary mb-4">terkumpul dari target Rp{{ number_format($campaign->target_nominal, 0, ',', '.') }}</p>
+                    <p class="small text-secondary mb-4">terkumpul dari target
+                        Rp{{ number_format($campaign->target_nominal, 0, ',', '.') }}</p>
                 @else
-                    <div class="wc-progress mb-2"><div style="width: {{ $campaign->progres_persen }}%"></div></div>
-                    <p class="mb-1"><strong>{{ $campaign->terkumpul_barang }} {{ $campaign->satuan_barang }}</strong></p>
-                    <p class="small text-secondary mb-4">terkumpul dari target {{ $campaign->target_barang }} {{ $campaign->satuan_barang }}</p>
+                    <div class="wc-progress mb-2">
+                        <div style="width: {{ $campaign->progres_persen }}%"></div>
+                    </div>
+                    <p class="mb-1"><strong>{{ $campaign->terkumpul_barang }} {{ $campaign->satuan_barang }}</strong>
+                    </p>
+                    <p class="small text-secondary mb-4">terkumpul dari target {{ $campaign->target_barang }}
+                        {{ $campaign->satuan_barang }}</p>
                 @endif
 
                 <div class="d-grid gap-2">

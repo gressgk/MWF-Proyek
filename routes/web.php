@@ -57,10 +57,13 @@ Route::prefix('auth')->group(function () {
 // modul donatur
 Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->group(function () {
     Route::get('beranda', [BerandaController::class, 'index'])->name('beranda');
-
     Route::get('campaign/{campaign:slug}', [DonaturCampaignController::class, 'index'])->name('campaign.show');
-    Route::get('campaign/{campaign:slug}/laporan-pdf', [DonaturCampaignController::class, 'exportLaporan'])->name('campaign.laporan-pdf');
 
+    Route::get('campaign/{campaign:slug}/laporan/{report}', [DonaturCampaignController::class, 'showReport'])
+        ->name('campaign.report.show');
+
+    Route::get('campaign/{campaign:slug}/laporan-pdf', [DonaturCampaignController::class, 'exportLaporan'])
+        ->name('campaign.laporan-pdf');
     Route::get('donasi/{campaign:slug}/uang', [DonasiUangController::class, 'index'])->name('donasi.uang');
     Route::post('donasi/{campaign:slug}/uang', [DonasiUangController::class, 'store']);
 
@@ -95,6 +98,8 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
 
     Route::get('laporan', [LaporanController::class, 'index'])->name('laporan');
     Route::post('laporan', [LaporanController::class, 'store']);
+    Route::get('laporan/{report}', [LaporanController::class, 'show'])
+        ->name('laporan.show');
 
     Route::get('chat', [PenerimaChatController::class, 'index'])->name('chat');
     Route::get('chat/{conversation}', [PenerimaChatDetailController::class, 'index'])->name('chat.show');
