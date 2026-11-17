@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Donatur;
 
 use App\Http\Controllers\Controller;
 use App\Models\Campaign;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class CampaignController extends Controller
 {
@@ -33,5 +34,20 @@ class CampaignController extends Controller
             ->findOrFail($report);
 
         return view('donatur.laporan-detail', compact('campaign', 'laporan'));
+    }
+
+    public function exportLaporan(Campaign $campaign)
+    {
+        abort_unless($campaign->status === 'aktif', 404);
+
+        $campaign->load([
+            'Penerima.PenerimaProfile',
+            'Reports.Photos',
+        ]);
+
+        $pdf = Pdf::loadView('donatur.laporan-pdf', compact('campaign'))
+            ->setPaper('a4', 'portrait');
+
+        return $pdf->download('Laporan-' . $campaign->slug . '.pdf');
     }
 }

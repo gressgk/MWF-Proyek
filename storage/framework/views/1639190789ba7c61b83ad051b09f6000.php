@@ -1,3 +1,6 @@
+
+
+
 <?php $__env->startSection('judul', 'Detail Laporan'); ?>
 
 <?php $__env->startSection('konten'); ?>

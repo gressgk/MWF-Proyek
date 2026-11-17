@@ -11,7 +11,7 @@ class CekRole
     public function handle(Request $request, Closure $next, ...$boleh): Response
     {
         if (getAuthUser() == false) {
-            return redirect('login');
+            return redirect()->route('login');
         }
 
         foreach ($boleh as $b) {

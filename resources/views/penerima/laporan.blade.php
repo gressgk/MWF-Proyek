@@ -29,7 +29,9 @@
                     <div class="row align-items-end g-3">
                         <div class="col-md-8">
                             <label class="form-label fw-semibold">Pilih Campaign</label>
-                            <select name="campaign_id" class="form-select">
+                            <select name="campaign_id" class="form-select" required>
+                                <option value="">-- Pilih Campaign --</option>
+
                                 @foreach ($campaigns as $item)
                                     <option value="{{ $item->id }}"
                                         {{ $campaign && $campaign->id == $item->id ? 'selected' : '' }}>
