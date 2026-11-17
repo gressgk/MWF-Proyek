@@ -32,15 +32,9 @@
                                 @if ($donasi->jenis == 'uang')
                                     Rp{{ number_format($donasi->nominal, 0, ',', '.') }}
                                 @else
-                                    <span class="fw-semibold">{{ $donasi->jumlah_barang }} {{ $donasi->satuan_barang }} {{ $donasi->nama_barang }}</span>
-                                    @if ($donasi->berat_gram)
-                                        <br><span class="small text-muted">{{ number_format($donasi->berat_gram, 0, ',', '.') }} gram</span>
-                                    @endif
-                                    @if ($donasi->metode_pengiriman === 'diantar_langsung')
-                                        <br><span class="small text-secondary"><i class="bi bi-geo-alt me-1"></i>Diantar langsung</span>
-                                    @elseif ($donasi->Shipment)
-                                        <br><span class="small text-secondary">{{ $donasi->Shipment->ekspedisi }} &middot; Resi: <code>{{ $donasi->Shipment->no_resi }}</code></span>
-                                        <br><span class="small text-secondary">Kurir: {{ str_replace('_', ' ', ucfirst($donasi->Shipment->status)) }}</span>
+                                    {{ $donasi->jumlah_barang }} {{ $donasi->satuan_barang }} {{ $donasi->nama_barang }}
+                                    @if ($donasi->Shipment)
+                                        <br><span class="small text-secondary">Tracking: {{ str_replace('_', ' ', ucfirst($donasi->Shipment->status)) }}</span>
                                     @endif
                                 @endif
                             </td>
@@ -48,7 +42,7 @@
                                 @php
                                     $warna = match ($donasi->status) {
                                         'terverifikasi', 'diterima' => 'success',
-                                        'menunggu_pembayaran', 'menunggu_konfirmasi' => 'warning',
+                                        'menunggu_pembayaran' => 'warning',
                                         default => 'danger',
                                     };
                                 @endphp
