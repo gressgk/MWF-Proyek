@@ -35,4 +35,33 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Midtrans — T0.6
+    |--------------------------------------------------------------------------
+    | Konfigurasi gateway pembayaran Midtrans untuk donasi uang.
+    | Gunakan config('services.midtrans.server_key') di kode aplikasi.
+    | Nilai diambil dari env(); JANGAN hardcode di sini atau di tempat lain.
+    | Implementasi API client dikerjakan di Tahap 1 (issue #48).
+    */
+    'midtrans' => [
+        'server_key'    => env('MIDTRANS_SERVER_KEY'),
+        'client_key'    => env('MIDTRANS_CLIENT_KEY'),
+        'is_production' => env('MIDTRANS_IS_PRODUCTION', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Komship — T0.6
+    |--------------------------------------------------------------------------
+    | Konfigurasi API ekspedisi Komship untuk pengiriman barang.
+    | Gunakan config('services.komship.api_key') di kode aplikasi.
+    | Nilai diambil dari env(); JANGAN hardcode di sini atau di tempat lain.
+    | Implementasi API client dikerjakan di Tahap 2/3 (issue #56–#58).
+    */
+    'komship' => [
+        'api_key'  => env('KOMSHIP_API_KEY'),
+        'base_url' => env('KOMSHIP_BASE_URL', 'https://api.komship.id'),
+    ],
+
 ];

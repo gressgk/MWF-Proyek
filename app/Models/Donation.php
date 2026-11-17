@@ -22,12 +22,24 @@ class Donation extends Model
         'nama_barang',
         'jumlah_barang',
         'satuan_barang',
+        'berat_gram',
         'foto_barang',
         'catatan',
         'metode_pengiriman',
         'status',
         'tanggal_diterima',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_anonim' => 'boolean',
+            'is_recurring' => 'boolean',
+            'jumlah_barang' => 'integer',
+            'berat_gram' => 'integer',
+            'tanggal_diterima' => 'datetime',
+        ];
+    }
 
     // relasi
     public function Campaign()

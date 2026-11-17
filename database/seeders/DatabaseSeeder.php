@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\BroadcastNotification;
+use App\Services\CampaignProgressService;
 use App\Models\Campaign;
 use App\Models\CampaignReport;
 use App\Models\Category;
@@ -152,53 +153,66 @@ class DatabaseSeeder extends Seeder
                 if ($campaign->tipe_bantuan == 'barang' || ($campaign->tipe_bantuan == 'keduanya' && rand(0, 1))) {
                     $itemKat = $itemKategori->random();
                     $jumlah = rand(5, 30);
-                    $statusKirim = fake()->randomElement(['dikirim', 'dalam_perjalanan', 'diterima']);
+
+                    // T0.2: Status donasi barang yang baru dibuat adalah 'menunggu_konfirmasi'.
+                    // Hanya donasi 'diterima' yang boleh dihitung ke terkumpul_barang.
+                    // Seed data dummy: sebagian besar sudah 'diterima' (simulasi barang sudah tiba),
+                    // sebagian 'menunggu_konfirmasi' (simulasi barang baru dikirim).
+                    $statusDonasi = fake()->randomElement(['diterima', 'diterima', 'diterima', 'menunggu_konfirmasi']);
+                    $statusKirim  = $statusDonasi === 'diterima' ? 'diterima' : fake()->randomElement(['dikirim', 'dalam_perjalanan']);
 
                     $donasi = Donation::create([
-                        'campaign_id' => $campaign->id,
-                        'user_id' => $donaturDipilih->id,
-                        'jenis' => 'barang',
-                        'is_anonim' => rand(0, 4) == 0,
-                        'item_category_id' => $itemKat->id,
-                        'nama_barang' => $itemKat->nama,
-                        'jumlah_barang' => $jumlah,
-                        'satuan_barang' => $campaign->satuan_barang ?? 'pcs',
-                        'catatan' => 'Barang dalam kondisi baik dan siap pakai.',
+                        'campaign_id'       => $campaign->id,
+                        'user_id'           => $donaturDipilih->id,
+                        'jenis'             => 'barang',
+                        'is_anonim'         => rand(0, 4) == 0,
+                        'item_category_id'  => $itemKat->id,
+                        'nama_barang'       => $itemKat->nama,
+                        'jumlah_barang'     => $jumlah,
+                        'satuan_barang'     => $campaign->satuan_barang ?? 'pcs',
+                        'catatan'           => 'Barang dalam kondisi baik dan siap pakai.',
                         'metode_pengiriman' => fake()->randomElement(['dikirim_sendiri', 'diantar_langsung']),
-                        'status' => $statusKirim == 'diterima' ? 'diterima' : 'terverifikasi',
-                        'tanggal_diterima' => $statusKirim == 'diterima' ? now()->subDays(rand(1, 10)) : null,
+                        'status'            => $statusDonasi,
+                        'tanggal_diterima'  => $statusDonasi === 'diterima' ? now()->subDays(rand(1, 10)) : null,
                     ]);
 
                     Shipment::create([
-                        'donation_id' => $donasi->id,
-                        'ekspedisi' => fake()->randomElement(['JNE', 'J&T Express', 'SiCepat']),
-                        'no_resi' => strtoupper(Str::random(12)),
-                        'estimasi_ongkir' => rand(15, 60) * 1000,
-                        'status' => $statusKirim,
-                        'last_tracked_at' => now()->subHours(rand(1, 48)),
+                        'donation_id'      => $donasi->id,
+                        'ekspedisi'        => fake()->randomElement(['JNE', 'J&T Express', 'SiCepat']),
+                        'no_resi'          => strtoupper(Str::random(12)),
+                        'estimasi_ongkir'  => rand(15, 60) * 1000,
+                        'status'           => $statusKirim,
+                        'last_tracked_at'  => now()->subHours(rand(1, 48)),
                     ]);
 
-                    $campaign->increment('terkumpul_barang', $jumlah);
+                    // T0.4: Jangan increment langsung. terkumpul_barang dihitung oleh
+                    // CampaignProgressService setelah seluruh donasi seed dibuat.
                 } else {
                     $nominal = fake()->randomElement([50000, 100000, 150000, 250000, 500000, 1000000]);
                     $rutin = rand(0, 4) == 0;
 
                     Donation::create([
-                        'campaign_id' => $campaign->id,
-                        'user_id' => $donaturDipilih->id,
-                        'jenis' => 'uang',
-                        'is_anonim' => rand(0, 4) == 0,
-                        'nominal' => $nominal,
+                        'campaign_id'  => $campaign->id,
+                        'user_id'      => $donaturDipilih->id,
+                        'jenis'        => 'uang',
+                        'is_anonim'    => rand(0, 4) == 0,
+                        'nominal'      => $nominal,
                         'is_recurring' => $rutin,
-                        'frequency' => $rutin ? fake()->randomElement(['mingguan', 'bulanan']) : null,
-                        'order_id' => 'WECARE-' . strtoupper(Str::random(10)),
-                        'status' => 'terverifikasi',
+                        'frequency'    => $rutin ? fake()->randomElement(['mingguan', 'bulanan']) : null,
+                        'order_id'     => 'WECARE-' . strtoupper(Str::random(10)),
+                        'status'       => 'terverifikasi',
                     ]);
 
-                    $campaign->increment('terkumpul_nominal', $nominal);
+                    // T0.4: Jangan increment langsung. terkumpul_nominal dihitung oleh
+                    // CampaignProgressService setelah seluruh donasi seed dibuat.
                 }
             }
         }
+
+        // T0.4 — Sinkronisasi ulang terkumpul_nominal dan terkumpul_barang
+        // untuk semua campaign setelah seluruh donasi seed selesai dibuat.
+        // Ini memastikan kolom campaign konsisten dengan aturan kontrak status.
+        (new CampaignProgressService())->syncAll();
 
         // 8. laporan penggunaan
         foreach ($campaignAktif->take(3) as $campaign) {
