@@ -13,9 +13,16 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // tambahkan middleware yang dibuat secara manual 
+        // tambahkan middleware yang dibuat secara manual
         $middleware->alias([
             'CekRole' => CekRole::class
+        ]);
+
+        // Kecualikan CSRF hanya untuk endpoint webhook Midtrans.
+        // Midtrans mengirim POST dari server mereka — tidak ada session/cookie browser.
+        // Pengecualian DIBUAT SPESIFIK untuk path ini saja, tidak global.
+        $middleware->validateCsrfTokens(except: [
+            'midtrans/webhook',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

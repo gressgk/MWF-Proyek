@@ -35,4 +35,22 @@ return [
         ],
     ],
 
+    'midtrans' => [
+        'server_key' => env('MIDTRANS_SERVER_KEY'),
+        'client_key' => env('MIDTRANS_CLIENT_KEY'),
+        'is_production' => (bool) env('MIDTRANS_IS_PRODUCTION', false),
+        'snap_url' => env('MIDTRANS_IS_PRODUCTION', false)
+            ? 'https://app.midtrans.com/snap/snap.js'
+            : 'https://app.sandbox.midtrans.com/snap/snap.js',
+        'api_url' => env('MIDTRANS_IS_PRODUCTION', false)
+            ? 'https://app.midtrans.com/snap/v1'
+            : 'https://app.sandbox.midtrans.com/snap/v1',
+        'status_api_url' => env('MIDTRANS_IS_PRODUCTION', false)
+            ? 'https://api.midtrans.com/v2'
+            : 'https://api.sandbox.midtrans.com/v2',
+        // Batas nominal sementara (menunggu ketentuan resmi dari PM / Pengaturan Admin WeCare)
+        'min_amount' => (int) env('MIDTRANS_MIN_AMOUNT', 1000),
+        'max_amount' => (int) env('MIDTRANS_MAX_AMOUNT', 100000000),
+    ],
+
 ];
