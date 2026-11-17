@@ -19,6 +19,7 @@
                         <th>Tipe Bantuan</th>
                         <th>Urgensi</th>
                         <th>Status</th>
+                        <th>QR Code</th>
                         <th>Aksi</th>
                     </tr>
                 </thead>
@@ -26,10 +27,15 @@
                     @forelse ($campaigns as $campaign)
                         <tr>
                             <td class="fw-semibold">{{ $campaign->judul }}</td>
+
                             <td class="text-capitalize">{{ $campaign->tipe_bantuan }}</td>
-                            <td><span
-                                    class="wc-badge wc-badge-{{ $campaign->urgensi }}">{{ ucfirst($campaign->urgensi) }}</span>
+
+                            <td>
+                                <span class="wc-badge wc-badge-{{ $campaign->urgensi }}">
+                                    {{ ucfirst($campaign->urgensi) }}
+                                </span>
                             </td>
+
                             <td>
                                 @php
                                     $warna = match ($campaign->status) {
@@ -39,6 +45,7 @@
                                         default => 'danger',
                                     };
                                 @endphp
+
                                 <span class="badge text-bg-{{ $warna }}">
                                     {{ str_replace('_', ' ', ucfirst($campaign->status)) }}
                                 </span>
@@ -50,23 +57,41 @@
                                     </div>
                                 @endif
                             </td>
+
                             <td>
-                                <a href="{{ route('mitra.campaign.edit', $campaign->id) }}" class="small">
-                                    Edit
-                                </a>
+                                @if ($campaign->qr_code_path)
+                                    <div class="d-flex align-items-center gap-2">
+                                        <img src="{{ asset('storage/' . $campaign->qr_code_path) }}"
+                                            alt="QR Code {{ $campaign->judul }}" width="65" height="65">
 
-                                &middot;
+                                        <a href="{{ asset('storage/' . $campaign->qr_code_path) }}"
+                                            download="QR-{{ $campaign->slug }}.svg" class="small">
+                                            Download
+                                        </a>
+                                    </div>
+                                @else
+                                    <span class="text-secondary small">Belum tersedia</span>
+                                @endif
+                            </td>
 
-                                <form action="{{ route('mitra.campaign.destroy', $campaign->id) }}" method="POST"
-                                    class="d-inline"
-                                    onsubmit="return confirm('Are you sure you want to delete this campaign?')">
-                                    @csrf
-                                    @method('DELETE')
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <a href="{{ route('mitra.campaign.edit', $campaign->id) }}" class="small">
+                                        Edit
+                                    </a>
 
-                                    <button type="submit" class="btn btn-link p-0 small text-danger text-decoration-none">
-                                        Hapus
-                                    </button>
-                                </form>
+                                    <form action="{{ route('mitra.campaign.destroy', $campaign->id) }}" method="POST"
+                                        class="m-0"
+                                        onsubmit="return confirm('Are you sure you want to delete this campaign?')">
+                                        @csrf
+                                        @method('DELETE')
+
+                                        <button type="submit"
+                                            class="btn btn-link p-0 small text-danger text-decoration-none">
+                                            Hapus
+                                        </button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                     @empty

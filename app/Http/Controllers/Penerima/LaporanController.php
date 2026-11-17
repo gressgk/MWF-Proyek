@@ -20,12 +20,12 @@ class LaporanController extends Controller
             ->get();
 
         // Use the selected campaign, or choose a default
+        // Only use the campaign explicitly selected by the user
         $campaign = $campaigns->firstWhere('id', $request->campaign_id);
 
-        if (!$campaign) {
-            $campaign = $campaigns->first(function ($item) {
-                return $item->Reports()->exists();
-            }) ?? $campaigns->first();
+        // Automatically select only when the Penerima has exactly one campaign
+        if (!$campaign && $campaigns->count() === 1) {
+            $campaign = $campaigns->first();
         }
 
         // Get reports for the selected campaign

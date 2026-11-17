@@ -157,9 +157,21 @@
     </div>
 
     <script>
-        document.getElementById('kategoriSelect').addEventListener('change', function() {
-            document.getElementById('kategoriLainnya').classList.toggle('d-none', this.value !== 'lainnya');
-        });
+        const kategoriSelect = document.getElementById('kategoriSelect');
+        const kategoriLainnya = document.getElementById('kategoriLainnya');
+
+        function toggleKategoriLainnya() {
+            const isLainnya = kategoriSelect.value === 'lainnya';
+
+            kategoriLainnya.classList.toggle('d-none', !isLainnya);
+            kategoriLainnya.disabled = !isLainnya;
+            kategoriLainnya.required = isLainnya;
+        }
+
+        kategoriSelect.addEventListener('change', toggleKategoriLainnya);
+
+        // Set the correct state when the page first loads
+        toggleKategoriLainnya();
 
         function toggleTargetFields(tipe) {
             const targetNominal = document.getElementById('targetNominalField');

@@ -29,21 +29,39 @@
                         @endif
                     </p>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-sm wc-btn-primary">Approve</button>
+                        <form action="{{ route('admin.verifikasi-mitra.approve', $mitra->id) }}" method="POST">
+                            @csrf
+                            @method('PUT')
+
+                            <button type="submit" class="btn btn-sm wc-btn-primary"
+                                onclick="return confirm('Approve this organization?')">
+                                Approve
+                            </button>
+                        </form>
                         <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
                             data-bs-target="#reject{{ $mitra->id }}">Reject</button>
                     </div>
                 </div>
             </div>
 
-            <div class="modal fade" id="reject{{ $mitra->id }}">
+            <div class="modal fade" id="reject{{ $mitra->id }}" tabindex="-1">
                 <div class="modal-dialog">
                     <div class="modal-content">
-                        <div class="modal-body p-4">
-                            <h6 class="fw-bold mb-3">Alasan Penolakan</h6>
-                            <textarea class="form-control mb-3" rows="3" placeholder="Jelaskan alasan penolakan, akan dikirim via email"></textarea>
-                            <button class="btn btn-danger w-100">Kirim Penolakan</button>
-                        </div>
+                        <form action="{{ route('admin.verifikasi-mitra.reject', $mitra->id) }}" method="POST">
+                            @csrf
+                            @method('PUT')
+
+                            <div class="modal-body p-4">
+                                <h6 class="fw-bold mb-3">Alasan Penolakan</h6>
+
+                                <textarea name="alasan_ditolak" class="form-control mb-3" rows="3" placeholder="Jelaskan alasan penolakan"
+                                    required></textarea>
+
+                                <button type="submit" class="btn btn-danger w-100">
+                                    Kirim Penolakan
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </div>

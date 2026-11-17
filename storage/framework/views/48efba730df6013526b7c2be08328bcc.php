@@ -30,7 +30,9 @@
                     <div class="row align-items-end g-3">
                         <div class="col-md-8">
                             <label class="form-label fw-semibold">Pilih Campaign</label>
-                            <select name="campaign_id" class="form-select">
+                            <select name="campaign_id" class="form-select" required>
+                                <option value="">-- Pilih Campaign --</option>
+
                                 <?php $__currentLoopData = $campaigns; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $item): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
                                     <option value="<?php echo e($item->id); ?>"
                                         <?php echo e($campaign && $campaign->id == $item->id ? 'selected' : ''); ?>>

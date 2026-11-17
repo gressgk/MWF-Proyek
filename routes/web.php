@@ -54,16 +54,30 @@ Route::prefix('auth')->group(function () {
     Route::post('reset-password', [ResetPasswordController::class, 'simpan'])->name('password.update');
 });
 
-// modul donatur
-Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->group(function () {
-    Route::get('beranda', [BerandaController::class, 'index'])->name('beranda');
-    Route::get('campaign/{campaign:slug}', [DonaturCampaignController::class, 'index'])->name('campaign.show');
+// Public campaign pages (no login required)
+Route::prefix('donatur')->name('donatur.')->group(function () {
+    Route::get('campaign/{campaign:slug}', [DonaturCampaignController::class, 'index'])
+        ->name('campaign.show');
 
     Route::get('campaign/{campaign:slug}/laporan/{report}', [DonaturCampaignController::class, 'showReport'])
         ->name('campaign.report.show');
 
     Route::get('campaign/{campaign:slug}/laporan-pdf', [DonaturCampaignController::class, 'exportLaporan'])
         ->name('campaign.laporan-pdf');
+});
+
+// modul donatur
+Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->group(function () {
+    Route::get('beranda', [BerandaController::class, 'index'])->name('beranda');
+    // Route::get('campaign/{campaign:slug}', [DonaturCampaignController::class, 'index'])->name('campaign.show');
+
+    // Route::get('campaign/{campaign:slug}/laporan/{report}', [DonaturCampaignController::class, 'showReport'])
+    //     ->name('campaign.report.show');
+
+    // Route::get('campaign/{campaign:slug}/laporan-pdf', [DonaturCampaignController::class, 'exportLaporan'])
+    //     ->name('campaign.laporan-pdf');
+
+    # Biar bisa lihat sebelum login
     Route::get('donasi/{campaign:slug}/uang', [DonasiUangController::class, 'index'])->name('donasi.uang');
     Route::post('donasi/{campaign:slug}/uang', [DonasiUangController::class, 'store']);
 
@@ -106,7 +120,9 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
     Route::post('chat/{conversation}/kirim', [PenerimaChatDetailController::class, 'kirimPesan']);
 
     Route::get('settings', [PenerimaSettingsController::class, 'index'])->name('settings');
-    Route::put('settings', [PenerimaSettingsController::class, 'update']);
+    Route::put('settings', [PenerimaSettingsController::class, 'update'])->name('settings.update');
+    Route::get('settings/dokumen-legalitas', [PenerimaSettingsController::class, 'previewLegalitas'])
+    ->name('settings.preview-legalitas');
 });
 
 // modul admin
@@ -114,8 +130,10 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
     Route::get('dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
 
     Route::get('verifikasi-mitra', [VerifikasiMitraController::class, 'index'])->name('verifikasi-mitra');
-    Route::put('verifikasi-mitra/{user}/approve', [VerifikasiMitraController::class, 'approve']);
-    Route::put('verifikasi-mitra/{user}/reject', [VerifikasiMitraController::class, 'reject']);
+    Route::put('verifikasi-mitra/{user}/approve', [VerifikasiMitraController::class, 'approve'])
+    ->name('verifikasi-mitra.approve');
+    Route::put('verifikasi-mitra/{user}/reject', [VerifikasiMitraController::class, 'reject'])
+        ->name('verifikasi-mitra.reject');
     Route::get('verifikasi-mitra/dokumen', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
 
     Route::get('approve-campaign', [ApproveCampaignController::class, 'index'])->name('approve-campaign');
@@ -124,10 +142,12 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
 
     Route::get('kategori', [KategoriController::class, 'index'])->name('kategori');
     Route::post('kategori/campaign', [KategoriController::class, 'storeCampaignKategori']);
+    Route::put('kategori/campaign/{category}', [KategoriController::class, 'updateCampaignKategori']);
     Route::delete('kategori/campaign/{category}', [KategoriController::class, 'destroyCampaignKategori']);
-    Route::post('kategori/barang', [KategoriController::class, 'storeItemKategori']);
-    Route::delete('kategori/barang/{itemCategory}', [KategoriController::class, 'destroyItemKategori']);
 
+    Route::post('kategori/barang', [KategoriController::class, 'storeItemKategori']);
+    Route::put('kategori/barang/{itemCategory}', [KategoriController::class, 'updateItemKategori']);
+    Route::delete('kategori/barang/{itemCategory}', [KategoriController::class, 'destroyItemKategori']);
     Route::get('monitoring-donasi', [MonitoringDonasiController::class, 'index'])->name('monitoring-donasi');
 
     Route::get('user', [AdminUserController::class, 'index'])->name('user');

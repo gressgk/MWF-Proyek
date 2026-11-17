@@ -19,6 +19,7 @@
                         <th>Tipe Bantuan</th>
                         <th>Urgensi</th>
                         <th>Status</th>
+                        <th>QR Code</th>
                         <th>Aksi</th>
                     </tr>
                 </thead>
@@ -26,10 +27,16 @@
                     <?php $__empty_1 = true; $__currentLoopData = $campaigns; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $campaign): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?>
                         <tr>
                             <td class="fw-semibold"><?php echo e($campaign->judul); ?></td>
+
                             <td class="text-capitalize"><?php echo e($campaign->tipe_bantuan); ?></td>
-                            <td><span
-                                    class="wc-badge wc-badge-<?php echo e($campaign->urgensi); ?>"><?php echo e(ucfirst($campaign->urgensi)); ?></span>
+
+                            <td>
+                                <span class="wc-badge wc-badge-<?php echo e($campaign->urgensi); ?>">
+                                    <?php echo e(ucfirst($campaign->urgensi)); ?>
+
+                                </span>
                             </td>
+
                             <td>
                                 <?php
                                     $warna = match ($campaign->status) {
@@ -39,6 +46,7 @@
                                         default => 'danger',
                                     };
                                 ?>
+
                                 <span class="badge text-bg-<?php echo e($warna); ?>">
                                     <?php echo e(str_replace('_', ' ', ucfirst($campaign->status))); ?>
 
@@ -52,23 +60,41 @@
                                     </div>
                                 <?php endif; ?>
                             </td>
+
                             <td>
-                                <a href="<?php echo e(route('mitra.campaign.edit', $campaign->id)); ?>" class="small">
-                                    Edit
-                                </a>
+                                <?php if($campaign->qr_code_path): ?>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <img src="<?php echo e(asset('storage/' . $campaign->qr_code_path)); ?>"
+                                            alt="QR Code <?php echo e($campaign->judul); ?>" width="65" height="65">
 
-                                &middot;
+                                        <a href="<?php echo e(asset('storage/' . $campaign->qr_code_path)); ?>"
+                                            download="QR-<?php echo e($campaign->slug); ?>.svg" class="small">
+                                            Download
+                                        </a>
+                                    </div>
+                                <?php else: ?>
+                                    <span class="text-secondary small">Belum tersedia</span>
+                                <?php endif; ?>
+                            </td>
 
-                                <form action="<?php echo e(route('mitra.campaign.destroy', $campaign->id)); ?>" method="POST"
-                                    class="d-inline"
-                                    onsubmit="return confirm('Are you sure you want to delete this campaign?')">
-                                    <?php echo csrf_field(); ?>
-                                    <?php echo method_field('DELETE'); ?>
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <a href="<?php echo e(route('mitra.campaign.edit', $campaign->id)); ?>" class="small">
+                                        Edit
+                                    </a>
 
-                                    <button type="submit" class="btn btn-link p-0 small text-danger text-decoration-none">
-                                        Hapus
-                                    </button>
-                                </form>
+                                    <form action="<?php echo e(route('mitra.campaign.destroy', $campaign->id)); ?>" method="POST"
+                                        class="m-0"
+                                        onsubmit="return confirm('Are you sure you want to delete this campaign?')">
+                                        <?php echo csrf_field(); ?>
+                                        <?php echo method_field('DELETE'); ?>
+
+                                        <button type="submit"
+                                            class="btn btn-link p-0 small text-danger text-decoration-none">
+                                            Hapus
+                                        </button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?>

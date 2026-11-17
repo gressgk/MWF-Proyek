@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class CampaignFormController extends Controller
 {
@@ -82,7 +83,7 @@ class CampaignFormController extends Controller
             $validated['target_nominal'] = null;
         }
 
-        Campaign::create([
+        $campaign = Campaign::create([
             'user_id' => $user->id,
             'category_id' => $validated['category_id'],
             'kategori_lainnya' => $validated['kategori_lainnya'] ?? null,
@@ -108,6 +109,24 @@ class CampaignFormController extends Controller
             'terkumpul_barang' => 0,
 
             'status' => 'pending_approval',
+        ]);
+
+        // Generate QR code for this campaign
+        $campaignUrl = route('donatur.campaign.show', $campaign->slug);
+
+        $qrCodePath = 'campaigns/qrcodes/' . $campaign->slug . '.svg';
+
+        Storage::disk('public')->put(
+            $qrCodePath,
+            QrCode::format('svg')
+                ->size(300)
+                ->margin(2)
+                ->generate($campaignUrl)
+        );
+
+        // Save QR code path
+        $campaign->update([
+            'qr_code_path' => $qrCodePath,
         ]);
 
         return redirect()
