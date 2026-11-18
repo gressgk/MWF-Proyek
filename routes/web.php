@@ -31,6 +31,7 @@ use App\Http\Controllers\Penerima\DashboardController as PenerimaDashboardContro
 use App\Http\Controllers\Penerima\DonasiMasukController;
 use App\Http\Controllers\Penerima\LaporanController;
 use App\Http\Controllers\Penerima\SettingsController as PenerimaSettingsController;
+use App\Http\Middleware\CekMitraApproved;
 use Illuminate\Support\Facades\Route;
 
 // -------------------------------------------------------------------------
@@ -50,6 +51,7 @@ Route::prefix('auth')->group(function () {
     Route::post('register', [RegisterDonaturController::class, 'store']);
 
     Route::get('register-mitra', [RegisterMitraController::class, 'index'])->name('register.mitra');
+    Route::post('register-mitra/akun', [RegisterMitraController::class, 'simpanAkun'])->name('register.mitra.akun');
     Route::post('register-mitra', [RegisterMitraController::class, 'store'])->name('register.mitra.store');
 
     Route::get('login', [LoginController::class, 'index'])->name('login');
@@ -110,8 +112,8 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
     Route::get('dashboard', [PenerimaDashboardController::class, 'index'])->name('dashboard');
 
     Route::get('campaign', [PenerimaCampaignController::class, 'index'])->name('campaign.index');
-    Route::get('campaign/tambah', [CampaignFormController::class, 'index'])->name('campaign.create');
-    Route::post('campaign', [CampaignFormController::class, 'store'])->name('campaign.store');
+    Route::get('campaign/tambah', [CampaignFormController::class, 'index'])->middleware(CekMitraApproved::class)->name('campaign.create');
+    Route::post('campaign', [CampaignFormController::class, 'store'])->middleware(CekMitraApproved::class)->name('campaign.store');
     Route::get('campaign/{campaign}/edit', [CampaignFormController::class, 'edit'])->name('campaign.edit');
     Route::put('campaign/{campaign}', [CampaignFormController::class, 'update'])->name('campaign.update');
     Route::delete('campaign/{campaign}', [CampaignFormController::class, 'destroy'])->name('campaign.destroy');
@@ -131,7 +133,7 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
     Route::get('settings', [PenerimaSettingsController::class, 'index'])->name('settings');
     Route::put('settings', [PenerimaSettingsController::class, 'update'])->name('settings.update');
     Route::get('settings/dokumen-legalitas', [PenerimaSettingsController::class, 'previewLegalitas'])
-    ->name('settings.preview-legalitas');
+        ->name('settings.preview-legalitas');
 });
 
 // modul admin
@@ -140,7 +142,7 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
 
     Route::get('verifikasi-mitra', [VerifikasiMitraController::class, 'index'])->name('verifikasi-mitra');
     Route::put('verifikasi-mitra/{user}/approve', [VerifikasiMitraController::class, 'approve'])
-    ->name('verifikasi-mitra.approve');
+        ->name('verifikasi-mitra.approve');
     Route::put('verifikasi-mitra/{user}/reject', [VerifikasiMitraController::class, 'reject'])
         ->name('verifikasi-mitra.reject');
     Route::get('verifikasi-mitra/dokumen', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
