@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Penerima;
 
 use App\Http\Controllers\Controller;
 use App\Models\Donation;
+use Illuminate\Support\Facades\DB;
 
 class DonasiMasukController extends Controller
 {
@@ -38,11 +39,19 @@ class DonasiMasukController extends Controller
             ->where('status', 'menunggu_konfirmasi')
             ->firstOrFail();
 
-        // Update donation status.
-        $donation->update([
-            'status' => 'terverifikasi',
-            'updated_at' => NOW(),
-        ]);
+        DB::transaction(function () use ($donation) {
+            DB::table('campaigns')->where('id', $donation->campaign_id)->lockForUpdate()->first();
+
+            // Update donation status.
+            $donation->update([
+                'status' => 'terverifikasi',
+                'tanggal_diterima' => now(),
+            ]);
+
+            DB::table('campaigns')
+                ->where('id', $donation->campaign_id)
+                ->increment('terkumpul_barang', $donation->jumlah_barang);
+        });
 
         return redirect()
             ->back()

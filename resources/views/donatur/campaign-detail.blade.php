@@ -3,6 +3,9 @@
 @section('judul', $campaign->judul . ' - WeCare')
 
 @section('konten')
+    @if (session('success'))
+        <div class="alert alert-success">{{ session('success') }}</div>
+    @endif
 
     <div class="row g-4">
         <div class="col-lg-8">

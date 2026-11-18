@@ -162,7 +162,11 @@ CREATE TABLE `donations` (
   `nominal` DECIMAL(15,2) NULL,
   `is_recurring` TINYINT(1) NOT NULL DEFAULT 0,
   `frequency` ENUM('mingguan','bulanan') NULL,
-  `order_id` VARCHAR(255) NULL,
+  `order_id` VARCHAR(255) NULL UNIQUE,
+  `snap_token` VARCHAR(255) NULL,
+  `snap_redirect_url` VARCHAR(500) NULL,
+  `payment_status_detail` VARCHAR(100) NULL,
+  `idempotency_key` VARCHAR(255) NULL UNIQUE,
   `item_category_id` BIGINT UNSIGNED NULL,
   `nama_barang` VARCHAR(255) NULL,
   `jumlah_barang` INT UNSIGNED NULL,
@@ -170,7 +174,10 @@ CREATE TABLE `donations` (
   `foto_barang` VARCHAR(255) NULL,
   `catatan` TEXT NULL,
   `metode_pengiriman` ENUM('dikirim_sendiri','diantar_langsung') NULL,
-  `status` ENUM('menunggu_pembayaran','terverifikasi','diterima','gagal') NOT NULL DEFAULT 'menunggu_pembayaran',
+  `status` ENUM('menunggu_pembayaran','menunggu_konfirmasi','terverifikasi','diterima','gagal') NOT NULL DEFAULT 'menunggu_pembayaran',
+  `webhook_processed_at` TIMESTAMP NULL,
+  `webhook_transaction_status` VARCHAR(50) NULL,
+  `webhook_fraud_status` VARCHAR(50) NULL,
   `tanggal_diterima` TIMESTAMP NULL,
   `created_at` TIMESTAMP NULL,
   `updated_at` TIMESTAMP NULL,
@@ -227,9 +234,20 @@ CREATE TABLE `campaign_reports` (
   `isi` TEXT NOT NULL,
   `foto_bukti` VARCHAR(255) NULL,
   `nominal_terpakai` DECIMAL(15,2) NULL,
+  `dokumen_bukti` VARCHAR(255) NULL,
   `created_at` TIMESTAMP NULL,
   `updated_at` TIMESTAMP NULL,
   CONSTRAINT `fk_campaign_reports_campaign` FOREIGN KEY (`campaign_id`) REFERENCES `campaigns` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ================= campaign_reports_photos =================
+CREATE TABLE `campaign_report_photos` (
+  `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `campaign_report_id` BIGINT UNSIGNED NOT NULL,
+  `foto_path` VARCHAR(255) NOT NULL,
+  `created_at` TIMESTAMP NULL,
+  `updated_at` TIMESTAMP NULL,
+  CONSTRAINT `fk_campaign_report_photos_report` FOREIGN KEY (`campaign_report_id`) REFERENCES `campaign_reports` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ================= broadcast_notifications =================
