@@ -49,24 +49,18 @@ Buat database-nya dulu di MySQL:
 CREATE DATABASE wecare;
 ```
 
-Import struktur tabel dari `database/wecare.sql` (bukan pakai migration Laravel):
+Import struktur tabel dasar dari `database/wecare.sql`:
 
-```bash
 mysql -u root -p wecare < database/wecare.sql
-```
 
-Atau lewat phpMyAdmin: pilih database `wecare` → tab **Import** → pilih file `database/wecare.sql`.
+Jalanin migration tambahan:
+php artisan migrate
 
 Isi data dummy:
-
-```bash
 php artisan db:seed
 php artisan serve
-```
 
-Akses di `http://localhost:8000`
-
-> Project ini tidak pakai migration Laravel — struktur tabel dibuat manual lewat `database/wecare.sql`. `php artisan db:seed` tetap jalan normal karena cuma butuh tabelnya sudah ada, bukan migration history.
+> Struktur tabel awal dibuat manual lewat wecare.sql, tapi perubahan setelahnya pakai migration Laravel biasa — makanya harus jalanin php artisan migrate juga.
 
 ## Akun Demo (password semua: `password`)
 

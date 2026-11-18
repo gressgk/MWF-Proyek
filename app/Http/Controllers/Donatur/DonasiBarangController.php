@@ -15,7 +15,7 @@ class DonasiBarangController extends Controller
     {
         abort_unless(
             $campaign->status === 'aktif' &&
-                in_array($campaign->tipe_bantuan, ['barang', 'keduanya']),
+            in_array($campaign->tipe_bantuan, ['barang', 'keduanya']),
             404
         );
 
@@ -37,14 +37,14 @@ class DonasiBarangController extends Controller
             'catatan' => 'nullable|string',
             'is_anonim' => 'nullable|boolean',
             'metode_pengiriman' => 'required|in:dikirim_sendiri,diantar_langsung',
-            'ekspedisi' => 'required_if:metode_pengiriman,dikirim_sendiri|nullable|in:JNE,J\&T Express,SiCepat',
+            'ekspedisi' => 'required_if:metode_pengiriman,dikirim_sendiri|nullable|in:JNE,J&T Express,SiCepat',
             'no_resi' => 'required_if:metode_pengiriman,dikirim_sendiri|nullable|string|max:255',
         ]);
 
         // Find an active campaign that accepts goods donations
         abort_unless(
             $campaign->status === 'aktif' &&
-                in_array($campaign->tipe_bantuan, ['barang', 'keduanya']),
+            in_array($campaign->tipe_bantuan, ['barang', 'keduanya']),
             404
         );
 
@@ -64,12 +64,7 @@ class DonasiBarangController extends Controller
             ->store('donations/items', 'public');
 
         try {
-            DB::transaction(function () use (
-                $validated,
-                $campaign,
-                $fotoPath,
-                $request
-            ) {
+            DB::transaction(function () use ($validated, $campaign, $fotoPath, $request) {
                 // Create donation record
                 $donation = Donation::create([
                     'campaign_id' => $campaign->id,

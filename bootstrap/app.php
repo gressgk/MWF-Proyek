@@ -29,4 +29,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn(Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // File upload kegedean (melebihi post_max_size PHP) -> balik dengan pesan jelas,
+        // bukan error page mentah.
+        $exceptions->render(function (\Illuminate\Http\Exceptions\PostTooLargeException $e, Request $request) {
+            return back()
+                ->withErrors(['foto_barang' => 'Ukuran file yang diupload terlalu besar. Maksimal 2MB.'])
+                ->withInput();
+        });
     })->create();
