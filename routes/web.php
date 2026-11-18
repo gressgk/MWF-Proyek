@@ -31,6 +31,7 @@ use App\Http\Controllers\Penerima\DashboardController as PenerimaDashboardContro
 use App\Http\Controllers\Penerima\DonasiMasukController;
 use App\Http\Controllers\Penerima\LaporanController;
 use App\Http\Controllers\Penerima\SettingsController as PenerimaSettingsController;
+use App\Http\Middleware\CekMitraApproved;
 use Illuminate\Support\Facades\Route;
 
 // -------------------------------------------------------------------------
@@ -111,8 +112,8 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
     Route::get('dashboard', [PenerimaDashboardController::class, 'index'])->name('dashboard');
 
     Route::get('campaign', [PenerimaCampaignController::class, 'index'])->name('campaign.index');
-    Route::get('campaign/tambah', [CampaignFormController::class, 'index'])->name('campaign.create');
-    Route::post('campaign', [CampaignFormController::class, 'store'])->name('campaign.store');
+    Route::get('campaign/tambah', [CampaignFormController::class, 'index'])->middleware(CekMitraApproved::class)->name('campaign.create');
+    Route::post('campaign', [CampaignFormController::class, 'store'])->middleware(CekMitraApproved::class)->name('campaign.store');
     Route::get('campaign/{campaign}/edit', [CampaignFormController::class, 'edit'])->name('campaign.edit');
     Route::put('campaign/{campaign}', [CampaignFormController::class, 'update'])->name('campaign.update');
     Route::delete('campaign/{campaign}', [CampaignFormController::class, 'destroy'])->name('campaign.destroy');
