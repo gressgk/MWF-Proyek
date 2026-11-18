@@ -9,7 +9,12 @@ class SettingsController extends Controller
     public function index()
     {
         $user = getAuthUser();
-        $donasiRutin = Donation::where('is_recurring', true)->with('Campaign')->get();
+
+        $donasiRutin = Donation::where('user_id', $user->id)
+            ->where('is_recurring', true)
+            ->with('Campaign')
+            ->get();
+
         return view('donatur.settings', compact('user', 'donasiRutin'));
     }
 }
