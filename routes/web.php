@@ -50,6 +50,7 @@ Route::prefix('auth')->group(function () {
     Route::post('register', [RegisterDonaturController::class, 'store']);
 
     Route::get('register-mitra', [RegisterMitraController::class, 'index'])->name('register.mitra');
+    Route::post('register-mitra/akun', [RegisterMitraController::class, 'simpanAkun'])->name('register.mitra.akun');
     Route::post('register-mitra', [RegisterMitraController::class, 'store'])->name('register.mitra.store');
 
     Route::get('login', [LoginController::class, 'index'])->name('login');
@@ -131,7 +132,7 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
     Route::get('settings', [PenerimaSettingsController::class, 'index'])->name('settings');
     Route::put('settings', [PenerimaSettingsController::class, 'update'])->name('settings.update');
     Route::get('settings/dokumen-legalitas', [PenerimaSettingsController::class, 'previewLegalitas'])
-    ->name('settings.preview-legalitas');
+        ->name('settings.preview-legalitas');
 });
 
 // modul admin
@@ -140,7 +141,7 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
 
     Route::get('verifikasi-mitra', [VerifikasiMitraController::class, 'index'])->name('verifikasi-mitra');
     Route::put('verifikasi-mitra/{user}/approve', [VerifikasiMitraController::class, 'approve'])
-    ->name('verifikasi-mitra.approve');
+        ->name('verifikasi-mitra.approve');
     Route::put('verifikasi-mitra/{user}/reject', [VerifikasiMitraController::class, 'reject'])
         ->name('verifikasi-mitra.reject');
     Route::get('verifikasi-mitra/dokumen', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
