@@ -40,3 +40,4 @@ repomix-output-hasil-audit-2.xml
 repomix-hasil-E3.xml
 plan-roadmap-real.md
 /storage/framework/views
+/storage/logs/*.log
