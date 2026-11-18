@@ -1,43 +1,94 @@
+
+# ==========================================
+# Dependencies
+# ==========================================
 /vendor/
-node_modules/
+/node_modules/
 npm-debug.log
 yarn-error.log
 
-# Laravel 4 specific
+# ==========================================
+# Operating System
+# ==========================================
+.DS_Store
+__MACOSX/
+._*
+Thumbs.db
+Desktop.ini
+
+# ==========================================
+# Environment & Credentials
+# ==========================================
+.env
+.env.*
+!.env.example
+auth.json
+/storage/*.key
+
+# ==========================================
+# Laravel Generated Files
+# ==========================================
 bootstrap/compiled.php
+/bootstrap/cache/*
+!/bootstrap/cache/.gitignore
+
 app/storage/
 
-# Laravel 5 & Lumen specific
-public/storage
-public/hot
+/storage/logs/*
+!/storage/logs/.gitignore
 
-# Laravel 5 & Lumen specific with changed public path
-public_html/storage
-public_html/hot
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/framework/testing/*
 
-storage/*.key
-.env
-Homestead.yaml
-Homestead.json
-/.vagrant
+!/storage/framework/cache/.gitignore
+!/storage/framework/sessions/.gitignore
+!/storage/framework/views/.gitignore
+!/storage/framework/testing/.gitignore
+!/storage/framework/cache/data/
+/storage/framework/cache/data/*
+!/storage/framework/cache/data/.gitignore
+
+/storage/pail/
+
+# ==========================================
+# Laravel User Uploads
+# ==========================================
+/storage/app/public/*
+/storage/app/private/*
+
+!/storage/app/public/.gitignore
+!/storage/app/private/.gitignore
+
+# ==========================================
+# Public Build & Storage Links
+# ==========================================
+/public/storage
+/public/hot
+/public/build/
+/public_html/storage
+/public_html/hot
+
+# ==========================================
+# Testing
+# ==========================================
 .phpunit.result.cache
 /.phpunit.cache
 
-/public/build
-/storage/pail
-.env.backup
-.env.production
+# ==========================================
+# Local Development
+# ==========================================
+Homestead.yaml
+Homestead.json
+/.vagrant
 .phpactor.json
-auth.json
+/_ide_helper.php
+
+# ==========================================
+# Project Documentation & AI Outputs
+# ==========================================
 *.pdf
-repomix-output-hasil-E3.2.xml
-repomix-output-hasil-E3.1.xml
-repomix-output-hasil-E2.xml
-repomix-output-hasil-E2.1.xml
-repomix-output-hasil-audit.xml
-repomix-output-hasil-audit-3.xml
-repomix-output-hasil-audit-2.xml
-repomix-hasil-E3.xml
+repomix-output-*.xml
+repomix-hasil-*.xml
 plan-roadmap-real.md
-/storage/framework/views
-/storage/logs/*.log
