@@ -29,3 +29,14 @@ Homestead.json
 .env.production
 .phpactor.json
 auth.json
+*.pdf
+repomix-output-hasil-E3.2.xml
+repomix-output-hasil-E3.1.xml
+repomix-output-hasil-E2.xml
+repomix-output-hasil-E2.1.xml
+repomix-output-hasil-audit.xml
+repomix-output-hasil-audit-3.xml
+repomix-output-hasil-audit-2.xml
+repomix-hasil-E3.xml
+plan-roadmap-real.md
+/storage/framework/views

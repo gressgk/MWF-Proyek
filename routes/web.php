@@ -22,6 +22,7 @@ use App\Http\Controllers\Donatur\DonasiUangController;
 use App\Http\Controllers\Donatur\RiwayatController;
 use App\Http\Controllers\Donatur\SettingsController as DonaturSettingsController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\MidtransWebhookController;
 use App\Http\Controllers\Penerima\CampaignController as PenerimaCampaignController;
 use App\Http\Controllers\Penerima\CampaignFormController;
 use App\Http\Controllers\Penerima\ChatController as PenerimaChatController;
@@ -31,6 +32,14 @@ use App\Http\Controllers\Penerima\DonasiMasukController;
 use App\Http\Controllers\Penerima\LaporanController;
 use App\Http\Controllers\Penerima\SettingsController as PenerimaSettingsController;
 use Illuminate\Support\Facades\Route;
+
+// -------------------------------------------------------------------------
+// Webhook Midtrans — CSRF dikecualikan via bootstrap/app.php untuk path ini.
+// Endpoint ini menerima POST dari server Midtrans, bukan dari browser Donatur.
+// Tidak memerlukan autentikasi user.
+// -------------------------------------------------------------------------
+Route::post('midtrans/webhook', [MidtransWebhookController::class, 'handle'])
+    ->name('midtrans.webhook');
 
 // halaman utama
 Route::get('/', [HomeController::class, 'index'])->name('home');
