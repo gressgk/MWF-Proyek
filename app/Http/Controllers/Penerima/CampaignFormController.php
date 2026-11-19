@@ -31,6 +31,7 @@ class CampaignFormController extends Controller
     public function store(Request $request)
     {
         $user = getAuthUser();
+        $this->authorize('create', Campaign::class);
 
         // Handle custom category
         if ($request->category_id === 'lainnya') {
@@ -138,7 +139,7 @@ class CampaignFormController extends Controller
     public function edit(Campaign $campaign)
     {
         $user = getAuthUser();
-
+        $this->authorize('update', $campaign);
         // Ensure campaign belongs to the logged-in Penerima
         abort_unless((int) $campaign->user_id === (int) $user->id, 403);
 
@@ -153,8 +154,8 @@ class CampaignFormController extends Controller
     // Update existing campaign
     public function update(Request $request, Campaign $campaign)
     {
-        $user = getAuthUser();
-
+        $user = getAuthUser(        );
+        $this->authorize('update', $campaign);
         // Ensure campaign belongs to the logged-in Penerima
         abort_unless((int) $campaign->user_id === (int) $user->id, 403);
 
@@ -261,7 +262,7 @@ class CampaignFormController extends Controller
     public function destroy(Campaign $campaign)
     {
         $user = getAuthUser();
-
+        $this->authorize('delete', $campaign);
         // Ensure campaign belongs to the logged-in Penerima
         abort_unless((int) $campaign->user_id === (int) $user->id, 403);
 

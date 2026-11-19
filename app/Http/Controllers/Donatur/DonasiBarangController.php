@@ -29,6 +29,7 @@ class DonasiBarangController extends Controller
 
     public function store(Request $request, Campaign $campaign)
     {
+        $this->authorize('create', Donation::class);
         $validated = $request->validate([
             'nama_barang' => 'required|string|max:255',
             'item_category_id' => 'required|exists:item_categories,id',

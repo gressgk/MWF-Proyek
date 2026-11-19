@@ -10,6 +10,7 @@ class CampaignController extends Controller
     public function index()
     {
         $user = getAuthUser();
+        $this->authorize('viewAny', Campaign::class);
 
         $campaigns = Campaign::with('Category')
             ->where('user_id', $user->id)

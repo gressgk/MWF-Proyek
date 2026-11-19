@@ -29,6 +29,11 @@ class DonationPolicy
         return false;
     }
 
+    public function create(User $user)
+    {
+        return $user->isDonatur();
+    }
+    
     public function konfirmasiDiterima(User $user, Donation $donation)
     {
         return $user->isPenerima() && $user->id == $donation->Campaign?->user_id && $donation->jenis == 'barang';

@@ -44,14 +44,15 @@ class DonasiUangController extends Controller
      */
     public function store(Request $request, Campaign $campaign, MidtransPaymentService $midtransService)
     {
+        $this->authorize('create', Donation::class);
         // 1. Validasi campaign aktif dan menerima uang
         abort_unless(
             $campaign->status === 'aktif' && in_array($campaign->tipe_bantuan, ['uang', 'keduanya']),
             404
-        );
-
+                );
         // 2. Validasi autentikasi donatur
-        $user = getAuthUser() ?? auth()->user();
+        $user = getAuthUser();
+        $this->authorize('create', Donation::class);
         abort_unless($user && $user->role === 'donatur', 403);
 
         // 3. Batas nominal (konfigurasi sementara: min Rp1.000, max Rp100.000.000)
@@ -228,12 +229,22 @@ class DonasiUangController extends Controller
                     'payment_status_detail' => 'initiating',
                 ]);
             });
+        
         } catch (QueryException $e) {
-            // Race condition: dua request simultan dengan key yang sama membentur unique constraint
+
+            // Log the actual database error
+            dd([
+                'message' => $e->getMessage(),
+                'sql' => $e->getSql(),
+                'bindings' => $e->getBindings(),
+                'code' => $e->getCode(),
+            ]);
+
+            // Handle duplicate idempotency key
             if ($e->getCode() == 23000 && $idempotencyKey) {
                 $existing = Donation::where('idempotency_key', $idempotencyKey)->first();
+
                 if ($existing && !empty($existing->snap_token)) {
-                    // Validasi ownership, campaign, nominal, is_anonim, dan status pending sebelum mengembalikan token
                     $isOwner = (int) $existing->user_id === (int) $user->id;
                     $isCampaignMatch = (int) $existing->campaign_id === (int) $campaign->id;
                     $isNominalMatch = (int) $existing->nominal === (int) $validated['nominal'];
@@ -252,18 +263,15 @@ class DonasiUangController extends Controller
 
                         $donation = $existing;
                         $snapToken = $existing->snap_token;
+
                         return view('donatur.donasi-uang', compact('campaign', 'donation', 'snapToken'));
                     }
                 }
             }
 
-            return $this->respondError(
-                $request,
-                'Terjadi konflik transaksi bersamaan. Silakan muat ulang halaman dan coba kembali.',
-                409,
-                'idempotency_key'
-            );
+            throw $e;
         }
+
 
         // 7. Request token Snap ke Midtrans Sandbox
         try {

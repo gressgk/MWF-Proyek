@@ -16,6 +16,8 @@ class ApproveCampaignController extends Controller
 
     public function approve(Campaign $campaign)
     {
+        $this->authorize('approve', $campaign);
+
         if ($campaign->status !== 'pending_approval') {
             return back()->with('error', 'Campaign is not awaiting approval.');
         }
@@ -30,6 +32,8 @@ class ApproveCampaignController extends Controller
 
     public function reject(Request $request, Campaign $campaign)
     {
+        $this->authorize('reject', $campaign);
+
         if ($campaign->status !== 'pending_approval') {
             return back()->with('error', 'Campaign is not awaiting approval.');
         }
