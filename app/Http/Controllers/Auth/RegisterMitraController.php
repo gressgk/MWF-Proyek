@@ -17,9 +17,11 @@ class RegisterMitraController extends Controller
     {
         $dataAkun = Session::get('register_mitra', []);
 
-        $step = $request->query('step') == 2 && !empty($dataAkun)
-            ? 2
-            : 1;
+        $step = 1;
+
+        if ($request->query('step') == 2 && !empty($dataAkun)) {
+            $step = 2;
+        }
 
         return view('auth.register-mitra', compact('step', 'dataAkun'));
     }
