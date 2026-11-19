@@ -22,8 +22,8 @@
         <div class="col-md-3">
             <div class="wc-stat-card">
                 <i class="bi bi-cash-coin text-warning fs-4"></i>
-                <h4 class="fw-bold mt-2 mb-0">Rp{{ number_format($totalDana, 0, ',', '.') }}</h4>
-                <p class="small text-secondary mb-0">Total Dana Terkumpul</p>
+                <h4 class="fw-bold mt-2 mb-0">Rp{{ number_format((float) $totalDana, 0, ',', '.') }}</h4>
+                <p class="small text-secondary mb-0">Total Dana Terverifikasi</p>
             </div>
         </div>
         <div class="col-md-3">
@@ -36,16 +36,21 @@
     </div>
 
     <div class="wc-card p-4">
-        <h6 class="fw-bold mb-3">Grafik Donasi per Bulan</h6>
-        <div class="d-flex align-items-end gap-3" style="height: 180px;">
-            @forelse ($donasiPerBulan as $d)
-                <div class="d-flex flex-column align-items-center justify-content-end" style="flex:1; height:100%;">
-                    <div style="width: 100%; max-width: 40px; height: {{ max(10, min(150, $d->total / 100000)) }}px; background-color: var(--wc-orange); border-radius: 8px 8px 0 0;"></div>
-                    <small class="text-secondary mt-1">{{ $d->bulan }}</small>
-                </div>
-            @empty
-                <p class="text-secondary small">Belum ada data donasi.</p>
-            @endforelse
+        <h6 class="fw-bold mb-1">Grafik Donasi Uang per Bulan</h6>
+        <p class="small text-secondary mb-3">12 bulan terakhir, hanya transaksi terverifikasi</p>
+        @if ((float) $totalDana <= 0)
+            <p class="text-secondary small">Belum ada donasi uang terverifikasi.</p>
+        @endif
+        <div class="overflow-auto">
+            <div class="d-flex align-items-end gap-2" style="min-width: 690px; height: 205px;">
+                @foreach ($donasiPerBulan as $data)
+                    <div class="d-flex flex-column align-items-center justify-content-end text-center" style="flex: 1; height: 100%;" title="{{ $data->label }} - Rp{{ number_format($data->total, 0, ',', '.') }}">
+                        <small class="text-secondary mb-1" style="font-size: 10px;">{{ $data->total > 0 ? 'Rp' . number_format($data->total, 0, ',', '.') : '0' }}</small>
+                        <div style="width: 100%; max-width: 34px; height: {{ $data->total > 0 ? max(5, round(($data->total / $maksGrafik) * 140)) : 0 }}px; background: var(--wc-orange, #e79d45); border-radius: 6px 6px 0 0;"></div>
+                        <small class="text-secondary mt-1" style="font-size: 10px;">{{ $data->label }}</small>
+                    </div>
+                @endforeach
+            </div>
         </div>
     </div>
 
