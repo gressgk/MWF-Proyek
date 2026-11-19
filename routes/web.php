@@ -98,8 +98,10 @@ Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->gro
     Route::get('riwayat', [RiwayatController::class, 'index'])->name('riwayat');
 
     Route::get('chat', [DonaturChatController::class, 'index'])->name('chat');
+    Route::post('campaign/{campaign:slug}/chat', [DonaturChatController::class, 'mulai'])->middleware('throttle:20,1')->name('chat.start');
     Route::get('chat/{conversation}', [DonaturChatDetailController::class, 'index'])->name('chat.show');
-    Route::post('chat/{conversation}/kirim', [DonaturChatDetailController::class, 'kirimPesan']);
+    Route::get('chat/{conversation}/pesan', [DonaturChatDetailController::class, 'pesan'])->name('chat.pesan');
+    Route::post('chat/{conversation}/kirim', [DonaturChatDetailController::class, 'kirimPesan'])->middleware('throttle:20,1')->name('chat.kirim');
 
     Route::get('settings', [DonaturSettingsController::class, 'index'])->name('settings');
     Route::put('settings', [DonaturSettingsController::class, 'update']);
@@ -128,7 +130,8 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
 
     Route::get('chat', [PenerimaChatController::class, 'index'])->name('chat');
     Route::get('chat/{conversation}', [PenerimaChatDetailController::class, 'index'])->name('chat.show');
-    Route::post('chat/{conversation}/kirim', [PenerimaChatDetailController::class, 'kirimPesan']);
+    Route::get('chat/{conversation}/pesan', [PenerimaChatDetailController::class, 'pesan'])->name('chat.pesan');
+    Route::post('chat/{conversation}/kirim', [PenerimaChatDetailController::class, 'kirimPesan'])->middleware('throttle:20,1')->name('chat.kirim');
 
     Route::get('settings', [PenerimaSettingsController::class, 'index'])->name('settings');
     Route::put('settings', [PenerimaSettingsController::class, 'update'])->name('settings.update');
