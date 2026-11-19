@@ -123,9 +123,18 @@
                             <i class="bi bi-box-seam me-1"></i> Donasi Barang
                         </a>
                     @endif
-                    <a href="{{ route('donatur.chat') }}" class="btn btn-light border">
-                        <i class="bi bi-chat-dots me-1"></i> Chat dengan Penerima
-                    </a>
+                    @if (getAuthUser() && getAuthUser()->isDonatur())
+                        <form method="POST" action="{{ route('donatur.chat.start', $campaign->slug) }}">
+                            @csrf
+                            <button type="submit" class="btn btn-light border w-100">
+                                <i class="bi bi-chat-dots me-1"></i> Chat dengan Penerima
+                            </button>
+                        </form>
+                    @elseif (!getAuthUser())
+                        <a href="{{ route('login') }}" class="btn btn-light border">
+                            <i class="bi bi-chat-dots me-1"></i> Masuk untuk Chat
+                        </a>
+                    @endif
                     <a href="{{ route('donatur.campaign.laporan-pdf', $campaign->slug) }}" class="btn btn-light border">
                         <i class="bi bi-file-earmark-pdf me-1"></i> Export Laporan PDF
                     </a>
