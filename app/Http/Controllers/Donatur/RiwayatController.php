@@ -9,6 +9,7 @@ class RiwayatController extends Controller
     public function index()
     {
         $user = getAuthUser();
+        $this->authorize('viewAny', Donation::class);
         $riwayat = Donation::with('Campaign', 'Shipment')->where('user_id', $user ? $user->id : 1)->latest()->paginate(10);
         return view('donatur.riwayat', compact('riwayat'));
     }

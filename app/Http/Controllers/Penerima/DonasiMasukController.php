@@ -11,7 +11,7 @@ class DonasiMasukController extends Controller
     public function index()
     {
         $user = getAuthUser();
-
+        $this->authorize('viewAny', Donation::class);
         $donasiMasuk = Donation::with([
             'Campaign',
             'Donatur',
@@ -28,16 +28,9 @@ class DonasiMasukController extends Controller
 
     public function konfirmasiDiterima(Donation $donation)
     {
-        $user = getAuthUser();
+        $this->authorize('konfirmasiDiterima', $donation);
 
-        // Only allow donations belonging to this Penerima's campaigns.
-        $donation = Donation::whereHas('Campaign', function ($query) use ($user) {
-            $query->where('user_id', $user->id);
-        })
-            ->where('id', $donation->id)
-            ->where('jenis', 'barang')
-            ->where('status', 'menunggu_konfirmasi')
-            ->firstOrFail();
+        abort_unless($donation->status === 'menunggu_konfirmasi', 404);
 
         DB::transaction(function () use ($donation) {
             DB::table('campaigns')->where('id', $donation->campaign_id)->lockForUpdate()->first();
