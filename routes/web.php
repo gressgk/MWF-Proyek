@@ -148,7 +148,7 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
         ->name('verifikasi-mitra.approve');
     Route::put('verifikasi-mitra/{user}/reject', [VerifikasiMitraController::class, 'reject'])
         ->name('verifikasi-mitra.reject');
-    Route::get('verifikasi-mitra/dokumen', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
+    Route::get('verifikasi-mitra/{user}/dokumen/{jenis}', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
 
     Route::get('approve-campaign', [ApproveCampaignController::class, 'index'])->name('approve-campaign');
     Route::put('approve-campaign/{campaign}/approve', [ApproveCampaignController::class, 'approve']);

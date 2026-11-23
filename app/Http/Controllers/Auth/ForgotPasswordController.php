@@ -20,12 +20,11 @@ class ForgotPasswordController extends Controller
             'email' => 'required|email',
         ]);
 
-        $status = Password::sendResetLink($request->only('email'));
+        Password::sendResetLink($request->only('email'));
 
-        if ($status == Password::RESET_LINK_SENT) {
-            return back()->with('pesan', 'Link reset password sudah dikirim, cek email kamu');
-        }
-
-        return back()->with('pesan', 'Email tidak ditemukan di sistem kami');
+        return back()->with(
+            'pesan',
+            'Jika email terdaftar, link reset password akan dikirim.'
+        );
     }
 }

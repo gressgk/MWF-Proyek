@@ -3,6 +3,19 @@
 @section('judul', 'Settings')
 
 @section('konten')
+    @if (session('pesan'))
+        <div class="alert alert-info small">
+            {{ session('pesan') }}
+        </div>
+    @endif
+
+    @if ($errors->any())
+        <div class="alert alert-danger small">
+            @foreach ($errors->all() as $error)
+                <div>{{ $error }}</div>
+            @endforeach
+        </div>
+    @endif
 
     <h5 class="fw-bold mb-4">Settings</h5>
 

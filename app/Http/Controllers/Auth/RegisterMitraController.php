@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 
 class RegisterMitraController extends Controller
 {
@@ -22,6 +23,8 @@ class RegisterMitraController extends Controller
         if ($request->query('step') == 2 && !empty($dataAkun)) {
             $step = 2;
         }
+
+        unset($dataAkun['password']);
 
         return view('auth.register-mitra', compact('step', 'dataAkun'));
     }
@@ -78,12 +81,14 @@ class RegisterMitraController extends Controller
         $pathLegalitas = null;
 
         try {
-            $pathKtp = $request->file('dokumen_ktp')
-                ->store('dokumen-mitra', 'local');
+            $pathKtp = $request->file('dokumen_ktp')->store('dokumen-mitra', 'local');
 
             if ($request->hasFile('dokumen_legalitas')) {
-                $pathLegalitas = $request->file('dokumen_legalitas')
-                    ->store('dokumen-mitra', 'local');
+                $pathLegalitas = $request->file('dokumen_legalitas')->store('dokumen-mitra', 'local');
+
+                if (!$pathLegalitas) {
+                    throw new RuntimeException('Upload legalitas gagal.');
+                }
             }
 
             DB::transaction(function () use ($request, $dataAkun, $pathKtp, $pathLegalitas) {
@@ -120,7 +125,12 @@ class RegisterMitraController extends Controller
 
         Session::forget('register_mitra');
 
-        return redirect()->route('login')
-            ->with('pesan', 'Pendaftaran berhasil dikirim, tunggu verifikasi Admin');
+        return redirect()->route('login')->with('pesan', 'Pendaftaran berhasil dikirim, tunggu verifikasi Admin');
+    }
+
+    public function index() {
+
+
+    
     }
 }
