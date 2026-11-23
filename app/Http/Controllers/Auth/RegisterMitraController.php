@@ -127,10 +127,4 @@ class RegisterMitraController extends Controller
 
         return redirect()->route('login')->with('pesan', 'Pendaftaran berhasil dikirim, tunggu verifikasi Admin');
     }
-
-    public function index() {
-
-
-    
-    }
 }

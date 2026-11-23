@@ -105,6 +105,8 @@ Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->gro
 
     Route::get('settings', [DonaturSettingsController::class, 'index'])->name('settings');
     Route::put('settings', [DonaturSettingsController::class, 'update']);
+    Route::put('settings/password', [DonaturSettingsController::class, 'gantiPassword'])
+        ->name('settings.password');
     Route::put('settings/donasi-rutin/{donation}/pause', [DonaturSettingsController::class, 'pauseRutin']);
     Route::delete('settings/donasi-rutin/{donation}', [DonaturSettingsController::class, 'batalkanRutin']);
 });
@@ -137,6 +139,8 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
     Route::put('settings', [PenerimaSettingsController::class, 'update'])->name('settings.update');
     Route::get('settings/dokumen-legalitas', [PenerimaSettingsController::class, 'previewLegalitas'])
         ->name('settings.preview-legalitas');
+    Route::put('settings/password', [PenerimaSettingsController::class, 'gantiPassword'])
+        ->name('settings.password');
 });
 
 // modul admin
@@ -172,4 +176,6 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
 
     Route::get('settings', [AdminSettingsController::class, 'index'])->name('settings');
     Route::put('settings', [AdminSettingsController::class, 'update']);
+    Route::put('settings/password', [AdminSettingsController::class, 'gantiPassword'])
+        ->name('settings.password');
 });

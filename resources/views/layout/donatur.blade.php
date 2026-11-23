@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="id" data-bs-theme="light">
 
 <head>
     <meta charset="utf-8">
@@ -7,6 +7,13 @@
     <title>@yield('judul', 'WeCare')</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <script>
+        const tema = localStorage.getItem('wecare-theme') === 'dark' ?
+            'dark' :
+            'light';
+
+        document.documentElement.setAttribute('data-bs-theme', tema);
+    </script>
     <link href="{{ asset('css/wecare.css') }}" rel="stylesheet">
 </head>
 
@@ -46,13 +53,22 @@
                         <li><a class="dropdown-item" href="{{ route('donatur.settings') }}"><i
                                     class="bi bi-gear me-2"></i>Settings</a></li>
                         <li>
+                            <button type="button" class="dropdown-item" data-theme-toggle>
+                                <i class="bi bi-moon-stars me-2"></i>
+                                <span>Dark Mode</span>
+                            </button>
+                        </li>
+                        <li>
                             <hr class="dropdown-divider">
                         </li>
                         <li>
-                            <form method="POST" action="{{ route('logout') }}">
+                            <form id="logoutForm" method="POST" action="{{ route('logout') }}">
                                 @csrf
-                                <button class="dropdown-item text-danger" type="submit"><i
-                                        class="bi bi-box-arrow-right me-2"></i>Keluar</button>
+                                <button class="dropdown-item text-danger" type="button" data-bs-toggle="modal"
+                                    data-bs-target="#logoutModal">
+                                    <i class="bi bi-box-arrow-right me-2"></i>
+                                    Keluar
+                                </button>
                             </form>
                         </li>
                     </ul>
@@ -78,7 +94,10 @@
         </div>
     </footer>
 
+    @include('partials.logout-modal')
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ asset('js/wecare-theme.js') }}"></script>
 </body>
 
 </html>

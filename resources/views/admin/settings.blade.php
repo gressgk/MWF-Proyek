@@ -3,6 +3,19 @@
 @section('judul', 'Settings')
 
 @section('konten')
+    @if (session('pesan'))
+        <div class="alert alert-info mb-4">
+            {{ session('pesan') }}
+        </div>
+    @endif
+
+    @if ($errors->any())
+        <div class="alert alert-danger mb-4">
+            @foreach ($errors->all() as $error)
+                <div>{{ $error }}</div>
+            @endforeach
+        </div>
+    @endif
 
     <div class="row g-4">
         <div class="col-lg-6">
@@ -13,11 +26,13 @@
                     @method('PUT')
                     <div class="mb-3">
                         <label class="form-label fw-semibold small">Nama</label>
-                        <input type="text" name="name" class="form-control" value="{{ $user->name ?? '' }}">
+                        <input type="text" name="name" class="form-control" value="{{ old('name', $user->name) }}"
+                            maxlength="255" required>
                     </div>
                     <div class="mb-4">
                         <label class="form-label fw-semibold small">Email</label>
-                        <input type="email" name="email" class="form-control" value="{{ $user->email ?? '' }}">
+                        <input type="email" name="email" class="form-control" value="{{ old('email', $user->email) }}"
+                            maxlength="255" required>
                     </div>
                     <button type="submit" class="wc-btn-primary">Simpan Perubahan</button>
                 </form>
@@ -27,12 +42,31 @@
         <div class="col-lg-6">
             <div class="wc-card p-4 mb-4">
                 <h6 class="fw-bold mb-3">Ganti Password</h6>
-                <form>
-                    <div class="mb-3"><input type="password" class="form-control" placeholder="Password lama"></div>
-                    <div class="mb-3"><input type="password" class="form-control" placeholder="Password baru"></div>
-                    <div class="mb-4"><input type="password" class="form-control" placeholder="Konfirmasi password baru"></div>
-                    <button type="submit" class="wc-btn-outline w-100">Ganti Password</button>
+
+                <form method="POST" action="{{ route('admin.settings.password') }}">
+                    @csrf
+                    @method('PUT')
+
+                    <div class="mb-3">
+                        <input type="password" name="password_lama" class="form-control" placeholder="Password lama"
+                            autocomplete="current-password" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <input type="password" name="password" class="form-control" placeholder="Password baru"
+                            autocomplete="new-password" minlength="8" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <input type="password" name="password_confirmation" class="form-control"
+                            placeholder="Konfirmasi password baru" autocomplete="new-password" minlength="8" required>
+                    </div>
+
+                    <button type="submit" class="wc-btn-outline w-100">
+                        Ganti Password
+                    </button>
                 </form>
+
             </div>
 
             <div class="wc-card p-4">

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="id" data-bs-theme="light">
 
 <head>
     <meta charset="utf-8">
@@ -7,6 +7,13 @@
     <title>@yield('judul', 'WeCare')</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <script>
+        const tema = localStorage.getItem('wecare-theme') === 'dark' ?
+            'dark' :
+            'light';
+
+        document.documentElement.setAttribute('data-bs-theme', tema);
+    </script>
     <link href="{{ asset('css/wecare.css') }}" rel="stylesheet">
 </head>
 
@@ -23,6 +30,10 @@
             </button>
             <div class="collapse navbar-collapse justify-content-end" id="navGuest">
                 <div class="d-flex gap-2 mt-3 mt-lg-0">
+                    <button type="button" class="wc-btn-outline" data-theme-toggle>
+                        <i class="bi bi-moon-stars me-2"></i>
+                        <span>Dark Mode</span>
+                    </button>
                     <a href="{{ route('login') }}" class="wc-btn-outline">Masuk</a>
                     <a href="{{ route('register') }}" class="wc-btn-primary">Mulai Donasi</a>
                 </div>
@@ -46,6 +57,7 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ asset('js/wecare-theme.js') }}"></script>
 </body>
 
 </html>

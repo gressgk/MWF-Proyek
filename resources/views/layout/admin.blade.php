@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="id" data-bs-theme="light">
 
 <head>
     <meta charset="utf-8">
@@ -7,6 +7,13 @@
     <title>@yield('judul', 'WeCare')</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <script>
+        const tema = localStorage.getItem('wecare-theme') === 'dark' ?
+            'dark' :
+            'light';
+
+        document.documentElement.setAttribute('data-bs-theme', tema);
+    </script>
     <link href="{{ asset('css/wecare.css') }}" rel="stylesheet">
 </head>
 
@@ -69,10 +76,16 @@
                     </a>
                 </li>
             </ul>
-            <form method="POST" action="{{ route('logout') }}">
+            <button type="button" class="nav-link border-0 bg-transparent w-100 text-start mb-2" data-theme-toggle>
+                <i class="bi bi-moon-stars me-2"></i>
+                <span>Dark Mode</span>
+            </button>
+            <form id="logoutForm" method="POST" action="{{ route('logout') }}">
                 @csrf
-                <button class="nav-link text-danger border-0 bg-transparent w-100 text-start" type="submit">
-                    <i class="bi bi-box-arrow-right me-2"></i>Keluar
+                <button class="nav-link text-danger border-0 bg-transparent w-100 text-start" type="button"
+                    data-bs-toggle="modal" data-bs-target="#logoutModal">
+                    <i class="bi bi-box-arrow-right me-2"></i>
+                    Keluar
                 </button>
             </form>
         </aside>
@@ -101,7 +114,10 @@
         </div>
     </div>
 
+    @include('partials.logout-modal')
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ asset('js/wecare-theme.js') }}"></script>
 </body>
 
 </html>

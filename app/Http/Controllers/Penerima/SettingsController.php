@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 class SettingsController extends Controller
@@ -89,7 +91,7 @@ class SettingsController extends Controller
         return redirect()->route('mitra.settings')
             ->with('pesan', 'Settings berhasil diperbarui.');
     }
-    
+
     public function previewLegalitas()
     {
         $user = getAuthUser();
@@ -106,5 +108,36 @@ class SettingsController extends Controller
         }
 
         return response()->file($filePath);
+    }
+
+
+    // Ganti password
+    public function gantiPassword(Request $request)
+    {
+        $user = getAuthUser();
+
+        $validated = $request->validate([
+            'password_lama' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        if (!Hash::check($validated['password_lama'], $user->password)) {
+            return back()->withErrors([
+                'password_lama' => 'Password lama tidak sesuai.',
+            ]);
+        }
+
+        if (Hash::check($validated['password'], $user->password)) {
+            return back()->withErrors([
+                'password' => 'Password baru harus berbeda dari password lama.',
+            ]);
+        }
+
+        $user->password = Hash::make($validated['password']);
+        $user->remember_token = Str::random(60);
+        $user->save();
+
+        return redirect()->route('mitra.settings')
+            ->with('pesan', 'Password berhasil diubah.');
     }
 }
