@@ -16,7 +16,9 @@ use Illuminate\Support\Facades\Log;
  * ALUR VERIFIKASI:
  *   1. Parse payload JSON.
  *   2. Validasi field minimum.
- *   3. Verifikasi signature SHA512(order_id + status_code + gross_amount + server_key).
+ *   3. Verifikasi signature SHA512(order_id + status_code + gross_amount + signature_secret_key).
+ *      CATATAN: Menggunakan Signature Secret Key (bukan Server Key API).
+ *      Server Key API tetap digunakan oleh MidtransPaymentService untuk Snap & Get Status API.
  *   4. Validasi konsistensi status_code dan transaction_status.
  *   5. Ambil Donation berdasarkan order_id — pastikan jenis='uang'.
  *   6. Cocokkan gross_amount secara eksak IDR (tanpa pembulatan float).
@@ -48,14 +50,17 @@ class MidtransWebhookController extends Controller
             return response()->json(['message' => 'Invalid payload'], 400);
         }
 
-        // 3. Verifikasi signature SHA512
-        $serverKey = config('services.midtrans.server_key', '');
-        if (empty($serverKey)) {
-            Log::error('Midtrans webhook: server key tidak dikonfigurasi');
+        // 3. Verifikasi signature SHA512 menggunakan Signature Secret Key
+        // CATATAN: Midtrans menyediakan dua credential berbeda:
+        //   - Server Key API  → autentikasi HTTP Basic untuk Snap & Get Status API (di MidtransPaymentService)
+        //   - Signature Secret Key → menandatangani payload webhook notification (di sini)
+        $signingSecret = config('services.midtrans.signature_secret_key', '');
+        if (empty($signingSecret)) {
+            Log::error('Midtrans webhook: signature secret key tidak dikonfigurasi');
             return response()->json(['message' => 'Service unavailable'], 503);
         }
 
-        $expectedSignature = hash('sha512', $orderId . $statusCode . $grossAmount . $serverKey);
+        $expectedSignature = hash('sha512', $orderId . $statusCode . $grossAmount . $signingSecret);
         if (!hash_equals($expectedSignature, $signatureKey)) {
             Log::warning('Midtrans webhook: signature tidak valid', [
                 'order_id' => $orderId,
@@ -133,6 +138,59 @@ class MidtransWebhookController extends Controller
             $progressService,
             $isPreVerifiedRecovery
         );
+
+        // 9. E4 Sandbox Preflight: Jika donasi ini merupakan pembayaran awal donasi rutin (INIT-SUB-...) yang berhasil terverifikasi
+        // dan belum memiliki subscription_id, selesaikan pembuatan Subscription API secara aman & terverifikasi provider!
+        $donation->refresh();
+        if (!empty($donation->frequency) && empty($donation->subscription_id) && $donation->status === 'terverifikasi') {
+            // signature_key webhook TIDAK mencakup saved_token_id.
+            // Jangan menerima saved_token_id dari webhook sebagai bukti yang cukup tanpa pengecekan provider!
+            try {
+                $remoteStatus = $midtransService->checkTransactionStatus($donation->order_id);
+                $remoteOrderId      = $remoteStatus['order_id'] ?? null;
+                $remoteCode         = (string) ($remoteStatus['status_code'] ?? '');
+                $remoteTxStatus     = $remoteStatus['transaction_status'] ?? null;
+                $remoteFraud        = $remoteStatus['fraud_status'] ?? null;
+                $remoteAmount       = $remoteStatus['gross_amount'] ?? null;
+                $remoteCurrency     = $remoteStatus['currency'] ?? null;
+                $providerSavedToken = $remoteStatus['saved_token_id'] ?? null;
+
+                $isRemoteSuccess = ($remoteTxStatus === 'settlement') || ($remoteTxStatus === 'capture' && $remoteFraud === 'accept');
+
+                // Validasi ketat fail-closed
+                if ((!empty($remoteOrderId) && $remoteOrderId !== $donation->order_id) ||
+                    $remoteCode !== '200' ||
+                    !$isRemoteSuccess ||
+                    empty($remoteAmount) ||
+                    !$midtransService->isExactAmountMatch($remoteAmount, (int) $donation->nominal) ||
+                    (!empty($remoteCurrency) && strtoupper($remoteCurrency) !== 'IDR') ||
+                    empty($providerSavedToken)
+                ) {
+                    Log::warning('Midtrans webhook: Verifikasi provider untuk initial charge gagal atau data tidak valid', [
+                        'order_id' => $donation->order_id,
+                    ]);
+                    return response()->json(['message' => 'Provider verification for initial charge failed'], 403);
+                }
+
+                // Cek jika webhook menyertakan saved_token_id yang diubah tanpa mengubah signature
+                $webhookSavedToken = $payload['saved_token_id'] ?? null;
+                if (!empty($webhookSavedToken) && !hash_equals($providerSavedToken, $webhookSavedToken)) {
+                    Log::warning('Midtrans webhook: saved_token_id pada webhook diubah dan tidak sesuai dengan token resmi provider', [
+                        'order_id' => $donation->order_id,
+                    ]);
+                    return response()->json(['message' => 'Forged saved_token_id detected'], 403);
+                }
+
+                // Aktifkan subscription menggunakan token resmi yang diverifikasi dari provider
+                $midtransService->activateSubscriptionFromInitialCharge($donation, $providerSavedToken);
+            } catch (\Throwable $e) {
+                Log::error('Midtrans webhook: Gagal menghubungi Status API provider saat verifikasi initial charge', [
+                    'order_id' => $donation->order_id,
+                    'error'    => $e->getMessage(),
+                ]);
+                return response()->json(['message' => 'Provider verification unavailable'], 503);
+            }
+        }
 
         Log::info('Midtrans webhook: processed', array_merge(
             ['order_id' => $orderId],

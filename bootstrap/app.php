@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Pengecualian DIBUAT SPESIFIK untuk path ini saja, tidak global.
         $middleware->validateCsrfTokens(except: [
             'midtrans/webhook',
+            'midtrans/webhook/subscription',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

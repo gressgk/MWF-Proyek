@@ -6,6 +6,9 @@ use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Gate;
+use App\Models\Subscription;
+use App\Policies\SubscriptionPolicy;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -17,6 +20,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Paginator::useBootstrapFive();
+        Gate::policy(Subscription::class, SubscriptionPolicy::class);
 
         ResetPassword::toMailUsing(function ($notifiable, $token) {
             $url = url(route('password.reset', ['token' => $token, 'email' => $notifiable->email], false));

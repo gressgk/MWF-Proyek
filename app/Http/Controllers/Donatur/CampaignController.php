@@ -16,7 +16,21 @@ class CampaignController extends Controller
             'Category',
             'Penerima.PenerimaProfile',
             'Reports.Photos',
-            'Donations.Donatur',
+            'Donations' => function ($query) {
+                $query->with('Donatur')
+                    ->where(function ($q) {
+                        $q->where(function ($money) {
+                            $money->where('jenis', 'uang')
+                                ->where('status', 'terverifikasi');
+                        })->orWhere(function ($goods) {
+                            $goods->where('jenis', 'barang')
+                                ->whereIn('status', ['terverifikasi', 'diterima']);
+                        });
+                    })
+                    ->orderByDesc('created_at')
+                    ->orderByDesc('id')
+                    ->limit(6);
+            },
         ]);
 
         return view('donatur.campaign-detail', compact('campaign'));

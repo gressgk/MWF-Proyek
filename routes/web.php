@@ -21,8 +21,10 @@ use App\Http\Controllers\Donatur\DonasiBarangController;
 use App\Http\Controllers\Donatur\DonasiUangController;
 use App\Http\Controllers\Donatur\RiwayatController;
 use App\Http\Controllers\Donatur\SettingsController as DonaturSettingsController;
+use App\Http\Controllers\Donatur\SubscriptionManagementController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\MidtransWebhookController;
+use App\Http\Controllers\MidtransRecurringWebhookController;
 use App\Http\Controllers\Penerima\CampaignController as PenerimaCampaignController;
 use App\Http\Controllers\Penerima\CampaignFormController;
 use App\Http\Controllers\Penerima\ChatController as PenerimaChatController;
@@ -41,6 +43,11 @@ use Illuminate\Support\Facades\Route;
 // -------------------------------------------------------------------------
 Route::post('midtrans/webhook', [MidtransWebhookController::class, 'handle'])
     ->name('midtrans.webhook');
+
+// Webhook siklus Donasi Rutin (Subscription API) — CSRF juga dikecualikan.
+// Midtrans mengirim notifikasi per siklus pembayaran berulang ke endpoint ini.
+Route::post('midtrans/webhook/subscription', [MidtransRecurringWebhookController::class, 'handle'])
+    ->name('midtrans.webhook.subscription');
 
 // halaman utama
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -91,6 +98,7 @@ Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->gro
     # Biar bisa lihat sebelum login
     Route::get('donasi/{campaign:slug}/uang', [DonasiUangController::class, 'index'])->name('donasi.uang');
     Route::post('donasi/{campaign:slug}/uang', [DonasiUangController::class, 'store']);
+    Route::post('donasi/verify-activation/{orderId}', [DonasiUangController::class, 'verifyActivation'])->name('donasi.verify-activation');
 
     Route::get('donasi/{campaign:slug}/barang', [DonasiBarangController::class, 'index'])->name('donasi.barang');
     Route::post('donasi/{campaign:slug}/barang', [DonasiBarangController::class, 'store']);
@@ -104,9 +112,11 @@ Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->gro
     Route::post('chat/{conversation}/kirim', [DonaturChatDetailController::class, 'kirimPesan'])->middleware('throttle:20,1')->name('chat.kirim');
 
     Route::get('settings', [DonaturSettingsController::class, 'index'])->name('settings');
-    Route::put('settings', [DonaturSettingsController::class, 'update']);
-    Route::put('settings/donasi-rutin/{donation}/pause', [DonaturSettingsController::class, 'pauseRutin']);
-    Route::delete('settings/donasi-rutin/{donation}', [DonaturSettingsController::class, 'batalkanRutin']);
+    Route::get('subscriptions', [SubscriptionManagementController::class, 'index'])->name('subscriptions.index');
+    Route::post('subscriptions/{subscription}/pause', [SubscriptionManagementController::class, 'pause'])->name('subscriptions.pause');
+    Route::post('subscriptions/{subscription}/resume', [SubscriptionManagementController::class, 'resume'])->name('subscriptions.resume');
+    Route::post('subscriptions/{subscription}/cancel', [SubscriptionManagementController::class, 'cancel'])->name('subscriptions.cancel');
+    Route::post('subscriptions/{subscription}/reconcile', [SubscriptionManagementController::class, 'reconcile'])->name('subscriptions.reconcile');
 });
 
 // modul penerima (mitra)

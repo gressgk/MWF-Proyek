@@ -76,7 +76,7 @@
 
             <div class="wc-card p-4">
                 <h5 class="fw-bold mb-3"><i class="bi bi-people me-2"></i>Donatur Terbaru</h5>
-                @forelse ($campaign->Donations->take(6) as $donasi)
+                @forelse ($campaign->Donations as $donasi)
                     <div class="d-flex justify-content-between align-items-center border-bottom py-2">
                         <span>{{ $donasi->nama_tampil }}</span>
                         <span class="small text-secondary">

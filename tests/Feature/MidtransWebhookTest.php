@@ -9,17 +9,18 @@ use Illuminate\Support\Str;
 
 // ============================================================
 // Helper: Buat signature Midtrans yang valid
-// SHA512(order_id + status_code + gross_amount + server_key)
+// SHA512(order_id + status_code + gross_amount + signature_secret_key)
 // ============================================================
 
-function makeWebhookSignature(string $orderId, string $statusCode, string $grossAmount, string $serverKey): string
+function makeWebhookSignature(string $orderId, string $statusCode, string $grossAmount, ?string $signingSecret = null): string
 {
-    return hash('sha512', $orderId . $statusCode . $grossAmount . $serverKey);
+    $secret = $signingSecret ?? config('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    return hash('sha512', $orderId . $statusCode . $grossAmount . $secret);
 }
 
 function webhookPayload(array $overrides = []): array
 {
-    $serverKey = config('services.midtrans.server_key', 'SB-Mid-server-test-key-12345');
+    $signingSecret = config('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
     $orderId = $overrides['order_id'] ?? 'DON-TEST-WEBHOOK-001';
     $statusCode = $overrides['status_code'] ?? '200';
     $grossAmount = $overrides['gross_amount'] ?? '50000.00';
@@ -30,7 +31,7 @@ function webhookPayload(array $overrides = []): array
         'gross_amount'        => $grossAmount,
         'transaction_status'  => 'settlement',
         'fraud_status'        => 'accept',
-        'signature_key'       => makeWebhookSignature($orderId, $statusCode, $grossAmount, $serverKey),
+        'signature_key'       => makeWebhookSignature($orderId, $statusCode, $grossAmount, $signingSecret),
     ], $overrides);
 }
 
@@ -79,6 +80,7 @@ beforeEach(function () {
 
     Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key-12345');
     Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key-12345');
+    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
     Config::set('services.midtrans.is_production', false);
 
     Http::preventStrayRequests();
@@ -122,14 +124,14 @@ test('valid settlement notification verifies donation and updates campaign progr
 test('valid capture with fraud_status accept verifies donation', function () {
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-CAPTURE-001']]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-CAPTURE-001',
         'status_code'        => '200',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'capture',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-CAPTURE-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-CAPTURE-001', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -148,14 +150,14 @@ test('capture with fraud_status challenge retains status menunggu_pembayaran wit
     // Transaksi masih menunggu review manual di MAP.
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-CAPTURE-CHALLENGE-001']]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-CAPTURE-CHALLENGE-001',
         'status_code'        => '200',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'capture',
         'fraud_status'       => 'challenge',
-        'signature_key'      => makeWebhookSignature('DON-CAPTURE-CHALLENGE-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-CAPTURE-CHALLENGE-001', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -171,14 +173,14 @@ test('capture with fraud_status challenge retains status menunggu_pembayaran wit
 test('capture with fraud_status deny marks donation as gagal', function () {
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-CAPTURE-DENY-001']]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-CAPTURE-DENY-001',
         'status_code'        => '200',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'capture',
         'fraud_status'       => 'deny',
-        'signature_key'      => makeWebhookSignature('DON-CAPTURE-DENY-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-CAPTURE-DENY-001', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -190,8 +192,55 @@ test('capture with fraud_status deny marks donation as gagal', function () {
 });
 
 // ============================================================
-// 4. SIGNATURE TIDAK VALID → 403
+// 4. SIGNATURE VERIFICATION (SIGNATURE SECRET KEY VS SERVER KEY)
 // ============================================================
+
+test('webhook signed with signature secret key is accepted', function () {
+    $donation = createPendingDonation(['donation' => ['order_id' => 'DON-SIG-SECRET-001']]);
+    $signingSecret = config('services.midtrans.signature_secret_key');
+
+    $payload = [
+        'order_id'           => 'DON-SIG-SECRET-001',
+        'status_code'        => '200',
+        'gross_amount'       => '50000.00',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => makeWebhookSignature('DON-SIG-SECRET-001', '200', '50000.00', $signingSecret),
+    ];
+
+    $response = $this->postJson(route('midtrans.webhook'), $payload);
+    $response->assertStatus(200)->assertJson(['message' => 'OK']);
+
+    $donation->refresh();
+    expect($donation->status)->toBe('terverifikasi');
+});
+
+test('webhook signed with server key API is rejected with 403 when secrets differ', function () {
+    $donation = createPendingDonation(['donation' => ['order_id' => 'DON-SIG-SERVERKEY-001']]);
+
+    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
+
+    // Pastikan kedua secret berbeda pada environment test
+    expect($serverKey)->not->toBe($signingSecret);
+
+    // Payload ditandatangani menggunakan SERVER KEY API (bukan Signature Secret Key)
+    $payload = [
+        'order_id'           => 'DON-SIG-SERVERKEY-001',
+        'status_code'        => '200',
+        'gross_amount'       => '50000.00',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => makeWebhookSignature('DON-SIG-SERVERKEY-001', '200', '50000.00', $serverKey),
+    ];
+
+    $response = $this->postJson(route('midtrans.webhook'), $payload);
+    $response->assertStatus(403)->assertJson(['message' => 'Invalid signature']);
+
+    // Status donation tetap menunggu_pembayaran
+    $donation->refresh();
+    expect($donation->status)->toBe('menunggu_pembayaran');
+});
 
 test('invalid signature is rejected with 403', function () {
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-SIG-TEST-001']]);
@@ -206,9 +255,49 @@ test('invalid signature is rejected with 403', function () {
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
-    $response->assertStatus(403);
+    $response->assertStatus(403)->assertJson(['message' => 'Invalid signature']);
 
     // Status donation tidak berubah
+    $donation->refresh();
+    expect($donation->status)->toBe('menunggu_pembayaran');
+});
+
+test('webhook with empty signature_key is rejected with 400', function () {
+    $donation = createPendingDonation(['donation' => ['order_id' => 'DON-SIG-EMPTY-001']]);
+
+    $payload = [
+        'order_id'           => 'DON-SIG-EMPTY-001',
+        'status_code'        => '200',
+        'gross_amount'       => '50000.00',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => '',
+    ];
+
+    $response = $this->postJson(route('midtrans.webhook'), $payload);
+    $response->assertStatus(400)->assertJson(['message' => 'Invalid payload']);
+
+    $donation->refresh();
+    expect($donation->status)->toBe('menunggu_pembayaran');
+});
+
+test('missing signature secret key configuration returns 503 service unavailable safely', function () {
+    $donation = createPendingDonation(['donation' => ['order_id' => 'DON-SIG-MISSING-CONF-001']]);
+
+    Config::set('services.midtrans.signature_secret_key', null);
+
+    $payload = [
+        'order_id'           => 'DON-SIG-MISSING-CONF-001',
+        'status_code'        => '200',
+        'gross_amount'       => '50000.00',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => 'some-dummy-signature',
+    ];
+
+    $response = $this->postJson(route('midtrans.webhook'), $payload);
+    $response->assertStatus(503)->assertJson(['message' => 'Service unavailable']);
+
     $donation->refresh();
     expect($donation->status)->toBe('menunggu_pembayaran');
 });
@@ -223,7 +312,7 @@ test('webhook with mismatched gross_amount is rejected with 422', function () {
         'nominal'  => 50000,
     ]]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     // Provider mengirim 75000 padahal database menyimpan 50000
     $payload = [
         'order_id'           => 'DON-MISMATCH-001',
@@ -231,7 +320,7 @@ test('webhook with mismatched gross_amount is rejected with 422', function () {
         'gross_amount'       => '75000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-MISMATCH-001', '200', '75000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-MISMATCH-001', '200', '75000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -249,14 +338,14 @@ test('webhook with mismatched gross_amount is rejected with 422', function () {
 // ============================================================
 
 test('webhook for unknown order_id returns 200 without side effects', function () {
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-NONEXISTENT-999',
         'status_code'        => '200',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-NONEXISTENT-999', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-NONEXISTENT-999', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -273,14 +362,14 @@ test('pending notification does not change donation status or campaign progress'
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-PENDING-001']]);
     $campaign = Campaign::find($donation->campaign_id);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-PENDING-001',
         'status_code'        => '201',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'pending',
         'fraud_status'       => null,
-        'signature_key'      => makeWebhookSignature('DON-PENDING-001', '201', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-PENDING-001', '201', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -301,14 +390,14 @@ test('expire notification marks donation as gagal and does not update campaign p
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-EXPIRE-001']]);
     $campaign = Campaign::find($donation->campaign_id);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-EXPIRE-001',
         'status_code'        => '407',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'expire',
         'fraud_status'       => null,
-        'signature_key'      => makeWebhookSignature('DON-EXPIRE-001', '407', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-EXPIRE-001', '407', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -329,14 +418,14 @@ test('expire notification marks donation as gagal and does not update campaign p
 test('deny notification marks donation as gagal', function () {
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-DENY-001']]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-DENY-001',
         'status_code'        => '202',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'deny',
         'fraud_status'       => 'deny',
-        'signature_key'      => makeWebhookSignature('DON-DENY-001', '202', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-DENY-001', '202', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -354,14 +443,14 @@ test('duplicate settlement webhook does not double count campaign progress', fun
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-DUPLICATE-001']]);
     $campaign = Campaign::find($donation->campaign_id);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-DUPLICATE-001',
         'status_code'        => '200',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-DUPLICATE-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-DUPLICATE-001', '200', '50000.00', $signingSecret),
     ];
 
     // Webhook pertama
@@ -385,7 +474,7 @@ test('out-of-order expire notification after settlement does not revert terverif
     // Skenario: settlement sudah diterima, kemudian expire datang terlambat
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-ORDER-001']]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
 
     // Settlement pertama
     $settlementPayload = [
@@ -394,7 +483,7 @@ test('out-of-order expire notification after settlement does not revert terverif
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-ORDER-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-ORDER-001', '200', '50000.00', $signingSecret),
     ];
     $this->postJson(route('midtrans.webhook'), $settlementPayload)->assertStatus(200);
 
@@ -408,7 +497,7 @@ test('out-of-order expire notification after settlement does not revert terverif
         'gross_amount'       => '50000.00',
         'transaction_status' => 'expire',
         'fraud_status'       => null,
-        'signature_key'      => makeWebhookSignature('DON-ORDER-001', '407', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-ORDER-001', '407', '50000.00', $signingSecret),
     ];
     $this->postJson(route('midtrans.webhook'), $expirePayload)->assertStatus(200);
 
@@ -480,7 +569,7 @@ test('two campaigns have independent progress from separate donations', function
         'payment_status_detail' => 'snap_created',
     ]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
 
     // Settlement campaign 1
     $this->postJson(route('midtrans.webhook'), [
@@ -489,7 +578,7 @@ test('two campaigns have independent progress from separate donations', function
         'gross_amount'       => '100000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-ALPHA-001', '200', '100000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-ALPHA-001', '200', '100000.00', $signingSecret),
     ])->assertStatus(200);
 
     // Settlement campaign 2
@@ -499,7 +588,7 @@ test('two campaigns have independent progress from separate donations', function
         'gross_amount'       => '200000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-BETA-001', '200', '200000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-BETA-001', '200', '200000.00', $signingSecret),
     ])->assertStatus(200);
 
     $campaign1->refresh();
@@ -523,14 +612,14 @@ test('anonymous donation webhook verifies and preserves internal user_id link', 
         ],
     ]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-ANONIM-001',
         'status_code'        => '200',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-ANONIM-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-ANONIM-001', '200', '50000.00', $signingSecret),
     ];
 
     $this->postJson(route('midtrans.webhook'), $payload)->assertStatus(200);
@@ -576,14 +665,14 @@ test('webhook cannot verify a barang donation via uang webhook endpoint', functi
         'idempotency_key'  => Str::uuid()->toString(),
     ]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-BARANG-001',
         'status_code'        => '200',
         'gross_amount'       => '0.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-BARANG-001', '200', '0.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-BARANG-001', '200', '0.00', $signingSecret),
     ];
 
     // Controller: WHERE jenis='uang' — donasi barang tidak akan ditemukan
@@ -610,14 +699,14 @@ test('refund notification on a terverifikasi donation is logged conservatively w
     // Simulasi: campaign sudah mencatat progress
     Campaign::where('id', $donation->campaign_id)->update(['terkumpul_nominal' => 50000]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     $payload = [
         'order_id'           => 'DON-REFUND-001',
         'status_code'        => '200',
         'gross_amount'       => '50000.00',
         'transaction_status' => 'refund',
         'fraud_status'       => null,
-        'signature_key'      => makeWebhookSignature('DON-REFUND-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-REFUND-001', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -715,8 +804,10 @@ test('reconcileDonation marks settled donation as terverifikasi and recalculates
 test('reconcileDonation marks expired donation as gagal', function () {
     Http::fake([
         'https://api.sandbox.midtrans.com/v2/DON-RECON-EXP-001/status' => Http::response([
+            'order_id' => 'DON-RECON-EXP-001',
             'status_code' => '407',
             'transaction_status' => 'expire',
+            'gross_amount' => '50000.00',
         ], 200),
     ]);
 
@@ -747,7 +838,7 @@ test('reconcileDonation handles not_found on provider without changing donation 
     $service = app(\App\Services\MidtransPaymentService::class);
     $result = $service->reconcileDonation($donation);
 
-    expect($result['reconciled'])->toBeTrue();
+    expect($result['reconciled'])->toBeFalse();
     expect($result['detail'])->toBe('order_not_found_on_provider');
 
     $donation->refresh();
@@ -774,6 +865,37 @@ test('reconcileDonation does not alter already final donation status', function 
     expect($donation->status)->toBe('terverifikasi');
 });
 
+test('reconciliation get status api uses server key for basic authentication', function () {
+    $expectedServerKey = 'SB-Mid-server-test-key-12345';
+    Config::set('services.midtrans.server_key', $expectedServerKey);
+    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/DON-AUTH-CHECK/status' => Http::response([
+            'order_id'           => 'DON-AUTH-CHECK',
+            'status_code'        => '200',
+            'transaction_status' => 'settlement',
+            'fraud_status'       => 'accept',
+            'gross_amount'       => '50000.00',
+        ], 200),
+    ]);
+
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-AUTH-CHECK',
+        'nominal'  => 50000,
+    ]]);
+
+    $service = app(\App\Services\MidtransPaymentService::class);
+    $result = $service->reconcileDonation($donation);
+
+    expect($result['reconciled'])->toBeTrue();
+
+    Http::assertSent(function (\Illuminate\Http\Client\Request $request) use ($expectedServerKey) {
+        $authHeader = $request->header('Authorization');
+        return $authHeader === ['Basic ' . base64_encode($expectedServerKey . ':')];
+    });
+});
+
 // ============================================================
 // 22. E3.1: STATUS CODE & TRANSACTION STATUS CONSISTENCY
 // ============================================================
@@ -781,7 +903,7 @@ test('reconcileDonation does not alter already final donation status', function 
 test('valid signature with inconsistent status_code and transaction_status is rejected with 422', function () {
     $donation = createPendingDonation(['donation' => ['order_id' => 'DON-INCONSISTENT-001']]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     // Inconsistent: transaction_status is settlement but status_code is 407 (expire)
     $payload = [
         'order_id'           => 'DON-INCONSISTENT-001',
@@ -789,7 +911,7 @@ test('valid signature with inconsistent status_code and transaction_status is re
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-INCONSISTENT-001', '407', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-INCONSISTENT-001', '407', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -809,7 +931,7 @@ test('webhook rejects fractional gross amount that does not match integer IDR ex
         'nominal'  => 50000,
     ]]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
     // Gross amount includes cents (.50) which is invalid for integer IDR
     $payload = [
         'order_id'           => 'DON-FRACTION-001',
@@ -817,7 +939,7 @@ test('webhook rejects fractional gross amount that does not match integer IDR ex
         'gross_amount'       => '50000.50',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-FRACTION-001', '200', '50000.50', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-FRACTION-001', '200', '50000.50', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -869,7 +991,7 @@ test('settlement webhook after prior expire failure recovers status when confirm
         'payment_status_detail' => 'payment_expire',
     ]]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
 
     // Mock API status provider yang mengonfirmasi bahwa transaksi sebenarnya telah 'settlement'
     Http::fake([
@@ -888,7 +1010,7 @@ test('settlement webhook after prior expire failure recovers status when confirm
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-RECOVER-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-RECOVER-001', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -947,7 +1069,7 @@ test('two donations on the same campaign update progress accurately without lost
         'payment_status_detail' => 'snap_created',
     ]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
 
     // Webhook 1 diproses
     $this->postJson(route('midtrans.webhook'), [
@@ -956,7 +1078,7 @@ test('two donations on the same campaign update progress accurately without lost
         'gross_amount'       => '100000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-SHARED-001', '200', '100000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-SHARED-001', '200', '100000.00', $signingSecret),
     ])->assertStatus(200);
 
     // Webhook 2 diproses
@@ -966,7 +1088,7 @@ test('two donations on the same campaign update progress accurately without lost
         'gross_amount'       => '150000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-SHARED-002', '200', '150000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-SHARED-002', '200', '150000.00', $signingSecret),
     ])->assertStatus(200);
 
     $campaign->refresh();
@@ -982,7 +1104,7 @@ test('webhook and get status api achieve identical state transitions and details
     $donationWebhook = createPendingDonation(['donation' => ['order_id' => 'DON-IDENTICAL-WEBHOOK']]);
     $donationRecon   = createPendingDonation(['donation' => ['order_id' => 'DON-IDENTICAL-RECON']]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
 
     // 1. Eksekusi via Webhook
     $this->postJson(route('midtrans.webhook'), [
@@ -991,7 +1113,7 @@ test('webhook and get status api achieve identical state transitions and details
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-IDENTICAL-WEBHOOK', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-IDENTICAL-WEBHOOK', '200', '50000.00', $signingSecret),
     ])->assertStatus(200);
 
     // 2. Eksekusi via Reconcile API
@@ -1081,7 +1203,7 @@ test('out-of-order recovery is rejected if provider response is incomplete', fun
         'payment_status_detail' => 'payment_expire',
     ]]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
 
     Http::fake([
         'https://api.sandbox.midtrans.com/v2/DON-RECOVER-INCOMPLETE-001/status' => Http::response([
@@ -1097,7 +1219,7 @@ test('out-of-order recovery is rejected if provider response is incomplete', fun
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-RECOVER-INCOMPLETE-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-RECOVER-INCOMPLETE-001', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
@@ -1119,7 +1241,7 @@ test('timeout during out-of-order recovery check leaves status gagal without cor
         'payment_status_detail' => 'payment_expire',
     ]]);
 
-    $serverKey = config('services.midtrans.server_key');
+    $signingSecret = config('services.midtrans.signature_secret_key');
 
     // Provider status API mengalami timeout
     Http::fake([
@@ -1134,7 +1256,7 @@ test('timeout during out-of-order recovery check leaves status gagal without cor
         'gross_amount'       => '50000.00',
         'transaction_status' => 'settlement',
         'fraud_status'       => 'accept',
-        'signature_key'      => makeWebhookSignature('DON-RECOVER-TIMEOUT-001', '200', '50000.00', $serverKey),
+        'signature_key'      => makeWebhookSignature('DON-RECOVER-TIMEOUT-001', '200', '50000.00', $signingSecret),
     ];
 
     $response = $this->postJson(route('midtrans.webhook'), $payload);
