@@ -117,6 +117,11 @@ Route::prefix('donatur')->middleware(['CekRole:donatur'])->name('donatur.')->gro
     Route::post('subscriptions/{subscription}/resume', [SubscriptionManagementController::class, 'resume'])->name('subscriptions.resume');
     Route::post('subscriptions/{subscription}/cancel', [SubscriptionManagementController::class, 'cancel'])->name('subscriptions.cancel');
     Route::post('subscriptions/{subscription}/reconcile', [SubscriptionManagementController::class, 'reconcile'])->name('subscriptions.reconcile');
+    Route::put('settings', [DonaturSettingsController::class, 'update']);
+    Route::put('settings/password', [DonaturSettingsController::class, 'gantiPassword'])
+        ->name('settings.password');
+    Route::put('settings/donasi-rutin/{donation}/pause', [DonaturSettingsController::class, 'pauseRutin']);
+    Route::delete('settings/donasi-rutin/{donation}', [DonaturSettingsController::class, 'batalkanRutin']);
 });
 
 // modul penerima (mitra)
@@ -147,6 +152,8 @@ Route::prefix('mitra')->middleware(['CekRole:penerima'])->name('mitra.')->group(
     Route::put('settings', [PenerimaSettingsController::class, 'update'])->name('settings.update');
     Route::get('settings/dokumen-legalitas', [PenerimaSettingsController::class, 'previewLegalitas'])
         ->name('settings.preview-legalitas');
+    Route::put('settings/password', [PenerimaSettingsController::class, 'gantiPassword'])
+        ->name('settings.password');
 });
 
 // modul admin
@@ -158,7 +165,7 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
         ->name('verifikasi-mitra.approve');
     Route::put('verifikasi-mitra/{user}/reject', [VerifikasiMitraController::class, 'reject'])
         ->name('verifikasi-mitra.reject');
-    Route::get('verifikasi-mitra/dokumen', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
+    Route::get('verifikasi-mitra/{user}/dokumen/{jenis}', [VerifikasiMitraController::class, 'download'])->name('verifikasi-mitra.dokumen');
 
     Route::get('approve-campaign', [ApproveCampaignController::class, 'index'])->name('approve-campaign');
     Route::put('approve-campaign/{campaign}/approve', [ApproveCampaignController::class, 'approve']);
@@ -182,4 +189,6 @@ Route::prefix('admin')->middleware(['CekRole:admin'])->name('admin.')->group(fun
 
     Route::get('settings', [AdminSettingsController::class, 'index'])->name('settings');
     Route::put('settings', [AdminSettingsController::class, 'update']);
+    Route::put('settings/password', [AdminSettingsController::class, 'gantiPassword'])
+        ->name('settings.password');
 });

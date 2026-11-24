@@ -165,3 +165,74 @@ a:hover { color: var(--wc-red); }
     border-color: var(--wc-orange);
     box-shadow: 0 0 0 .2rem rgba(242, 169, 59, .2);
 }
+
+
+/* Dark Mode */
+[data-bs-theme="dark"] {
+    --wc-cream: #24272e;
+    --wc-cream-soft: #2b2f37;
+    --wc-card: #343840;
+    --wc-brown-dark: #f5eee4;
+    --wc-brown: #c3bdba;
+    --wc-brown-light: #a9a29b;
+    --wc-orange: #f2a93b;
+    --wc-orange-dark: #f4b957;
+    --wc-pink: #463c43;
+    --wc-red: #ff987f;
+    --wc-green: #a2c9a7;
+    --wc-border: #4b505a;
+
+    --bs-body-bg: var(--wc-cream);
+    --bs-body-color: var(--wc-brown-dark);
+    --bs-border-color: var(--wc-border);
+    --bs-secondary-bg: var(--wc-cream-soft);
+    --bs-tertiary-bg: var(--wc-card);
+}
+
+[data-bs-theme="dark"] .wc-hero {
+    background: linear-gradient(135deg, #393128, var(--wc-cream));
+}
+
+[data-bs-theme="dark"] .wc-btn-outline {
+    color: var(--wc-orange-dark);
+}
+
+[data-bs-theme="dark"] .wc-card,
+[data-bs-theme="dark"] .wc-stat-card {
+    color: var(--wc-brown-dark);
+}
+
+[data-bs-theme="dark"] .text-dark {
+    color: var(--wc-brown-dark) !important;
+}
+
+[data-bs-theme="dark"] .bg-white,
+[data-bs-theme="dark"] .bg-light {
+    background-color: var(--wc-card) !important;
+}
+
+[data-bs-theme="dark"] .wc-badge-mendesak {
+    background-color: #49352f;
+}
+
+[data-bs-theme="dark"] .wc-badge-biasa {
+    background-color: #49402f;
+}
+
+[data-bs-theme="dark"] .wc-badge-terjadwal {
+    background-color: #304338;
+}
+
+[data-bs-theme="dark"] .form-control,
+[data-bs-theme="dark"] .form-select {
+    background-color: var(--wc-card);
+    color: var(--wc-brown-dark);
+}
+
+[data-bs-theme="dark"] .dropdown-menu,
+[data-bs-theme="dark"] .modal-content {
+    background-color: var(--wc-card);
+    color: var(--wc-brown-dark);
+    border-color: var(--wc-border);
+}
+

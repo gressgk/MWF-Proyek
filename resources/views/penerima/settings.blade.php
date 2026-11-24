@@ -3,6 +3,19 @@
 @section('judul', 'Settings')
 
 @section('konten')
+    @if (session('pesan'))
+        <div class="alert alert-info mb-4">
+            {{ session('pesan') }}
+        </div>
+    @endif
+
+    @if ($errors->any())
+        <div class="alert alert-danger mb-4">
+            @foreach ($errors->all() as $error)
+                <div>{{ $error }}</div>
+            @endforeach
+        </div>
+    @endif
 
     <h5 class="fw-bold mb-4">Settings</h5>
 
@@ -15,16 +28,16 @@
                     <div class="mb-3">
                         <label class="form-label fw-semibold small">Nama Organisasi</label>
                         <input type="text" name="nama_organisasi" class="form-control"
-                            value="{{ $profil->nama_organisasi ?? '' }}">
+                            value="{{ old('nama_organisasi', $profil->nama_organisasi ?? '') }}" maxlength="255" required>
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold small">Alamat</label>
-                        <textarea name="alamat" class="form-control" rows="2">{{ $profil->alamat ?? '' }}</textarea>
+                        <textarea name="alamat" class="form-control" rows="2" required>{{ old('alamat', $profil->alamat ?? '') }}</textarea>
                     </div>
                     <div class="mb-3">
                         <label class="form-label fw-semibold small">Rekening Bank untuk Pencairan Dana</label>
                         <input type="text" name="nomor_rekening" class="form-control"
-                            value="{{ $profil->nomor_rekening ?? '' }}">
+                            value="{{ old('nomor_rekening', $profil->nomor_rekening ?? '') }}" maxlength="50" required>
                     </div>
 
                     <div class="mb-4">
@@ -69,12 +82,29 @@
         <div class="col-lg-5">
             <div class="wc-card p-4">
                 <h6 class="fw-bold mb-3">Ganti Password</h6>
-                <form>
-                    <div class="mb-3"><input type="password" class="form-control" placeholder="Password lama"></div>
-                    <div class="mb-3"><input type="password" class="form-control" placeholder="Password baru"></div>
-                    <div class="mb-4"><input type="password" class="form-control" placeholder="Konfirmasi password baru">
+
+                <form method="POST" action="{{ route('mitra.settings.password') }}">
+                    @csrf
+                    @method('PUT')
+
+                    <div class="mb-3">
+                        <input type="password" name="password_lama" class="form-control" placeholder="Password lama"
+                            autocomplete="current-password" required>
                     </div>
-                    <button type="submit" class="wc-btn-outline w-100">Ganti Password</button>
+
+                    <div class="mb-3">
+                        <input type="password" name="password" class="form-control" placeholder="Password baru"
+                            autocomplete="new-password" minlength="8" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <input type="password" name="password_confirmation" class="form-control"
+                            placeholder="Konfirmasi password baru" autocomplete="new-password" minlength="8" required>
+                    </div>
+
+                    <button type="submit" class="wc-btn-outline w-100">
+                        Ganti Password
+                    </button>
                 </form>
             </div>
         </div>

@@ -19,16 +19,19 @@ class ResetPasswordController extends Controller
     public function simpan(Request $request)
     {
         $request->validate([
-            'token' => 'required',
+            'token' => 'required|string',
             'email' => 'required|email',
-            'password' => 'required|min:8|confirmed',
+            'password' => 'required|string|min:8|confirmed',
         ]);
 
         $status = Password::reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
             function ($user, $password) {
                 $user->password = Hash::make($password);
+                $user->remember_token = Str::random(60);
                 $user->save();
+
+                event(new PasswordReset($user));
             }
         );
 
@@ -36,6 +39,9 @@ class ResetPasswordController extends Controller
             return redirect()->route('login')->with('pesan', 'Password berhasil direset, silakan masuk');
         }
 
-        return back()->with('pesan', 'Token reset tidak valid atau sudah kadaluarsa');
+        return back()->with(
+            'pesan',
+            'Token reset tidak valid atau sudah kadaluarsa'
+        );
     }
 }

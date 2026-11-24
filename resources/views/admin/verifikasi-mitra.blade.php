@@ -3,6 +3,19 @@
 @section('judul', 'Verifikasi Mitra')
 
 @section('konten')
+    @if (session('pesan'))
+        <div class="alert alert-info small">
+            {{ session('pesan') }}
+        </div>
+    @endif
+
+    @if ($errors->any())
+        <div class="alert alert-danger small">
+            @foreach ($errors->all() as $error)
+                <div>{{ $error }}</div>
+            @endforeach
+        </div>
+    @endif
 
     <h5 class="fw-bold mb-3">Menunggu Verifikasi</h5>
     <div class="row g-3 mb-4">
@@ -17,15 +30,26 @@
                         <span class="badge text-bg-warning align-self-start">Pending</span>
                     </div>
                     <p class="small mb-1"><i class="bi bi-geo-alt me-1"></i>{{ $mitra->PenerimaProfile->alamat ?? '-' }}</p>
-                    <p class="small mb-3">
+                   <p class="small mb-3">
                         <i class="bi bi-file-earmark-text me-1"></i>
-                        <a
-                            href="{{ route('admin.verifikasi-mitra.dokumen', ['path' => $mitra->PenerimaProfile->dokumen_ktp ?? '']) }}">Lihat
-                            dokumen KTP</a>
+
+                        @if ($mitra->PenerimaProfile->dokumen_ktp ?? false)
+                            <a href="{{ route('admin.verifikasi-mitra.dokumen', [
+                                'user' => $mitra->id,
+                                'jenis' => 'ktp'
+                            ]) }}">
+                                Lihat dokumen KTP
+                            </a>
+                        @endif
+
                         @if ($mitra->PenerimaProfile->dokumen_legalitas ?? false)
-                            &middot; <a
-                                href="{{ route('admin.verifikasi-mitra.dokumen', ['path' => $mitra->PenerimaProfile->dokumen_legalitas]) }}">Lihat
-                                dokumen legalitas</a>
+                            &middot;
+                            <a href="{{ route('admin.verifikasi-mitra.dokumen', [
+                                'user' => $mitra->id,
+                                'jenis' => 'legalitas'
+                            ]) }}">
+                                Lihat dokumen legalitas
+                            </a>
                         @endif
                     </p>
                     <div class="d-flex gap-2">
