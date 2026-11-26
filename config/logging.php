@@ -65,6 +65,13 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'midtrans_observability' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/midtrans-outbound.log'),
+            'level' => 'info',
+            'replace_placeholders' => false,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),

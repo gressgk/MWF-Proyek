@@ -1080,3 +1080,34 @@ test('concurrent query exception collision with mismatched payload rejects retur
     $response->assertSessionHasErrors(['idempotency_key']);
     expect($response->getContent())->not->toContain('snap-token-donatur1');
 });
+
+test('e5.1.8c checkout outbound snap: rejects invalid, fractional, null, or oversized local nominal before any HTTP call', function (mixed $badNominal) {
+    Http::fake();
+    $donatur = User::factory()->donatur()->create();
+    $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
+
+    $donation = Donation::create([
+        'campaign_id'     => $campaign->id,
+        'user_id'         => $donatur->id,
+        'jenis'           => 'uang',
+        'nominal'         => $badNominal === 'OVERSIZED' ? 10000 : $badNominal,
+        'order_id'        => 'DON-SNAP-BAD-' . Str::random(6),
+        'status'          => 'menunggu_pembayaran',
+        'idempotency_key' => Str::uuid()->toString(),
+    ]);
+    if ($badNominal === 'OVERSIZED') {
+        $donation->nominal = '10000000000000';
+    }
+
+    $service = app(\App\Services\MidtransPaymentService::class);
+
+    expect(fn () => $service->createSnapTransaction($donation, $donatur, $campaign))
+        ->toThrow(\App\Services\MidtransApiException::class);
+
+    Http::assertNothingSent();
+})->with([
+    'fractional nominal' => ['50000.99'],
+    'null nominal' => [null],
+    'zero nominal' => [0],
+    'oversized nominal' => ['OVERSIZED'],
+]);

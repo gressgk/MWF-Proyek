@@ -60,4 +60,15 @@ class Subscription extends Model
     {
         return $this->hasMany(Donation::class, 'subscription_id', 'subscription_id');
     }
+
+    /**
+     * Menentukan apakah row sedang memiliki lease guard manajemen aktif (< 5 menit),
+     * selaras dengan SubscriptionManagementService::acquireGuard().
+     */
+    public function isOperationInProgress(): bool
+    {
+        return $this->operation_guard_at !== null
+            && $this->operation_guard_at->gt(now()->subMinutes(5))
+            && !empty($this->operation_guard_owner);
+    }
 }

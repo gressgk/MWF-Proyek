@@ -28,6 +28,25 @@ class MidtransApiException extends \RuntimeException
         return $this->statusCode;
     }
 }
+class MidtransSubscriptionResponseException extends MidtransApiException
+{
+    protected ?string $providerSubscriptionId;
+
+    public function __construct(
+        string $message,
+        int $statusCode = 422,
+        ?string $providerSubscriptionId = null,
+        ?\Throwable $previous = null
+    ) {
+        $this->providerSubscriptionId = $providerSubscriptionId;
+        parent::__construct($message, $statusCode, $previous);
+    }
+
+    public function getProviderSubscriptionId(): ?string
+    {
+        return $this->providerSubscriptionId;
+    }
+}
 
 class MidtransPaymentService
 {
@@ -40,6 +59,8 @@ class MidtransPaymentService
     protected string $subscriptionApiUrl;
 
     public const SUPPORTED_RECURRING_PAYMENTS = ['credit_card', 'gopay'];
+    public const MAX_WHOLE_IDR_AMOUNT = '9999999999999';
+    public const MAX_WHOLE_IDR_DIGITS = 13;
 
     public function __construct()
     {
@@ -84,7 +105,10 @@ class MidtransPaymentService
             throw new MidtransConfigurationException('Midtrans Server Key belum dikonfigurasi pada server.');
         }
 
-        $grossAmount = (int) $donation->nominal;
+        $grossAmount = $this->parseStrictWholeIdrInt($donation->nominal);
+        if ($grossAmount === null) {
+            throw new MidtransApiException('Nominal donasi lokal tidak valid untuk transaksi pembayaran.', 422);
+        }
 
         $payload = [
             'transaction_details' => [
@@ -107,13 +131,18 @@ class MidtransPaymentService
         ];
 
         try {
-            $response = Http::withBasicAuth($this->serverKey, '')
-                ->withHeaders([
-                    'Accept' => 'application/json',
-                    'Content-Type' => 'application/json',
-                ])
-                ->timeout(15)
-                ->post("{$this->apiUrl}/transactions", $payload);
+            $response = $this->httpObservability()->observe(
+                'snap_create_transaction',
+                fn () => Http::withBasicAuth($this->serverKey, '')
+                    ->withHeaders([
+                        'Accept' => 'application/json',
+                        'Content-Type' => 'application/json',
+                    ])
+                    ->timeout(15)
+                    ->post("{$this->apiUrl}/transactions", $payload),
+                localDonationId: $donation->id ? (int) $donation->id : null,
+                correlationRef: $donation->order_id
+            );
 
             if ($response->failed()) {
                 $statusCode = $response->status();
@@ -199,7 +228,7 @@ class MidtransPaymentService
     public function createSubscription(
         User $user,
         Campaign $campaign,
-        int $nominal,
+        mixed $nominal,
         string $frequency,
         string $paymentType,
         string $token,
@@ -209,6 +238,11 @@ class MidtransPaymentService
     ): array {
         if (!$this->isConfigured()) {
             throw new MidtransConfigurationException('Midtrans Server Key belum dikonfigurasi pada server.');
+        }
+
+        $normalizedAmount = $this->normalizeStrictWholeIdrAmount($nominal);
+        if ($normalizedAmount === null) {
+            throw new MidtransApiException('Nominal donasi rutin tidak valid.', 422);
         }
 
         $paymentType = strtolower($paymentType);
@@ -245,11 +279,11 @@ class MidtransPaymentService
         $name = substr(preg_replace('/[^a-zA-Z0-9\-_~.]/', '', $name), 0, 40);
 
         // Pencegahan double charge: jika start_time ditentukan dalam options (misal 1 periode di masa depan setelah initial charge), gunakan itu
-        $startTime = $options['start_time'] ?? now()->format('Y-m-d H:i:s O');
+        $startTime = $options['start_time'] ?? $this->scheduleService()->formatOutboundStartTime(now()->utc());
 
         $payload = [
             'name' => $name,
-            'amount' => (string) $nominal,
+            'amount' => $normalizedAmount,
             'currency' => 'IDR',
             'payment_type' => $paymentType,
             'token' => $token,
@@ -285,11 +319,23 @@ class MidtransPaymentService
             $headers['Idempotency-Key'] = substr(trim($idempotencyKey), 0, 36);
         }
 
+        $obsLocalDonationId = isset($options['local_donation_id']) && is_numeric($options['local_donation_id'])
+            ? (int) $options['local_donation_id']
+            : null;
+        $obsCorrelationRef = isset($options['correlation_ref']) && is_string($options['correlation_ref'])
+            ? $options['correlation_ref']
+            : null;
+
         try {
-            $response = Http::withBasicAuth($this->serverKey, '')
-                ->withHeaders($headers)
-                ->timeout(15)
-                ->post($this->subscriptionApiUrl, $payload);
+            $response = $this->httpObservability()->observe(
+                'subscription_create',
+                fn () => Http::withBasicAuth($this->serverKey, '')
+                    ->withHeaders($headers)
+                    ->timeout(15)
+                    ->post($this->subscriptionApiUrl, $payload),
+                localDonationId: $obsLocalDonationId,
+                correlationRef: $obsCorrelationRef
+            );
 
             if ($response->failed()) {
                 $statusCode = $response->status();
@@ -313,11 +359,34 @@ class MidtransPaymentService
             }
 
             $data = $response->json();
-            if (empty($data['id'])) {
+            if (!is_array($data) || !is_string($data['id'] ?? null) || trim($data['id']) === '') {
                 throw new MidtransApiException('ID langganan tidak diterima dari gateway.', 500);
             }
 
+            $createdSubId = trim($data['id']);
+            $returnedAmount = array_key_exists('amount', $data) ? $data['amount'] : null;
+            $returnedCurrency = $data['currency'] ?? null;
+            $currencyInvalid = $returnedCurrency !== null
+                && (!is_string($returnedCurrency) || strtoupper(trim($returnedCurrency)) !== 'IDR');
+
+            if (!$this->isExactAmountMatch($returnedAmount, $normalizedAmount) || $currencyInvalid) {
+                Log::error('Midtrans Subscription API create response amount/currency unverified', [
+                    'campaign_id'     => $campaign->id,
+                    'subscription_id' => $createdSubId,
+                    'expected_amount' => $normalizedAmount,
+                    'returned_amount' => is_scalar($returnedAmount) ? $returnedAmount : gettype($returnedAmount),
+                ]);
+
+                throw new MidtransSubscriptionResponseException(
+                    'Respons pembuatan langganan dari penyedia tidak memuat nominal yang terverifikasi.',
+                    422,
+                    $createdSubId
+                );
+            }
+
             return $data;
+        } catch (MidtransSubscriptionResponseException $e) {
+            throw $e;
         } catch (ConnectionException $e) {
             Log::error('Midtrans Subscription API connection error', [
                 'campaign_id' => $campaign->id,
@@ -345,13 +414,18 @@ class MidtransPaymentService
             throw new MidtransConfigurationException('Midtrans Server Key belum dikonfigurasi pada server.');
         }
 
+        $grossAmount = $this->parseStrictWholeIdrInt($donation->nominal);
+        if ($grossAmount === null) {
+            throw new MidtransApiException('Nominal pembayaran awal tidak valid.', 422);
+        }
+
         $chargeUrl = ($this->isProduction ? 'https://api.midtrans.com/v2' : 'https://api.sandbox.midtrans.com/v2') . '/charge';
 
         $payload = [
             'payment_type' => 'credit_card',
             'transaction_details' => [
                 'order_id'     => $donation->order_id,
-                'gross_amount' => (int) $donation->nominal,
+                'gross_amount' => $grossAmount,
             ],
             'credit_card' => [
                 'token_id'       => $cardTokenId,
@@ -365,13 +439,18 @@ class MidtransPaymentService
         ];
 
         try {
-            $response = Http::withBasicAuth($this->serverKey, '')
-                ->withHeaders([
-                    'Accept'       => 'application/json',
-                    'Content-Type' => 'application/json',
-                ])
-                ->timeout(15)
-                ->post($chargeUrl, $payload);
+            $response = $this->httpObservability()->observe(
+                'card_initial_charge',
+                fn () => Http::withBasicAuth($this->serverKey, '')
+                    ->withHeaders([
+                        'Accept'       => 'application/json',
+                        'Content-Type' => 'application/json',
+                    ])
+                    ->timeout(15)
+                    ->post($chargeUrl, $payload),
+                localDonationId: $donation->id ? (int) $donation->id : null,
+                correlationRef: $donation->order_id
+            );
 
             if ($response->failed()) {
                 $status = $response->status();
@@ -397,7 +476,8 @@ class MidtransPaymentService
      */
     public function activateSubscriptionFromInitialCharge(
         Donation $donation,
-        ?string $savedTokenId = null
+        ?string $savedTokenId = null,
+        mixed $verifiedPaymentAmount = null
     ): array {
         if (empty($donation->frequency) || !in_array($donation->frequency, ['mingguan', 'bulanan'], true)) {
             return [
@@ -407,13 +487,85 @@ class MidtransPaymentService
             ];
         }
 
+        $validatedLocalNominal = $this->normalizeStrictWholeIdrAmount($donation->nominal);
+        if ($validatedLocalNominal === null) {
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'message'      => 'Nominal donasi lokal tidak valid untuk aktivasi langganan.',
+            ];
+        }
+
+        $verifiedPaymentSnapshot = null;
+        if ($verifiedPaymentAmount !== null) {
+            $verifiedPaymentSnapshot = $this->normalizeStrictWholeIdrAmount($verifiedPaymentAmount);
+            if ($verifiedPaymentSnapshot === null || $verifiedPaymentSnapshot !== $validatedLocalNominal) {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'message'      => 'Nominal pembayaran awal tidak konsisten dengan data tagihan.',
+                ];
+            }
+        }
+
+        // 0. TZ0.2 + E5.2 4.3: Blokir sejak awal jika Donation memiliki penanda konflik atau outcome ambigu/manual-review.
+        $currentDonationDetail = Donation::whereKey($donation->id)->value('payment_status_detail')
+            ?? $donation->payment_status_detail;
+        if (in_array($currentDonationDetail, [
+            'subscription_created_conflict_manual_review',
+            'subscription_created_protected_conflict',
+            'subscription_activation_ambiguous_manual_review',
+        ], true)) {
+            $isAmbiguous = $currentDonationDetail === 'subscription_activation_ambiguous_manual_review';
+
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'recoverable'  => false,
+                'ambiguous'    => $isAmbiguous,
+                'message'      => $isAmbiguous
+                    ? 'Status pembuatan langganan dari penyedia masih ambigu (misalnya timeout/server error). Pengiriman ulang otomatis diblokir untuk mencegah langganan ganda; silakan periksa riwayat atau hubungi pengelola.'
+                    : 'Aktivasi langganan memerlukan pemeriksaan manual karena konflik data penyedia; pembuatan ulang otomatis diblokir.',
+            ];
+        }
+
         // 1. Cek idempotency awal jika subscription_id sudah ada pada donasi
         if (!empty($donation->subscription_id)) {
             $existingSub = Subscription::where('subscription_id', $donation->subscription_id)->first();
+            if ($existingSub && !$this->isExistingSubscriptionCompatibleWithDonation($existingSub, $donation, $validatedLocalNominal)) {
+                Log::warning('Midtrans recovery blocked due to local subscription identity or parameter mismatch', [
+                    'subscription_id' => $existingSub->subscription_id,
+                    'order_id'        => $donation->order_id,
+                ]);
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => false,
+                    'message'      => 'Subscription lokal tidak sesuai dengan pemilik atau parameter donasi.',
+                ];
+            }
+            if ($existingSub && $this->isSubscriptionProtectedFromRecovery($existingSub)) {
+                Log::warning('Midtrans recovery blocked for protected local subscription state', [
+                    'subscription_id' => $existingSub->subscription_id,
+                    'management_state' => $existingSub->management_state,
+                ]);
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => false,
+                    'message'      => 'Langganan lokal sudah dikelola atau sedang dalam operasi manajemen; pemulihan dibatalkan untuk melindungi status langganan.',
+                ];
+            }
+
             // Hanya jalur pemulihan provider untuk subscription_id yang sudah ada.
             // Kegagalan Get Subscription WAJIB fail-closed; tidak boleh jatuh ke Create API.
             try {
-                $remoteSub = $this->getSubscription($donation->subscription_id);
+                $remoteSub = $this->getSubscription(
+                    $donation->subscription_id,
+                    null,
+                    $donation->id ? (int) $donation->id : null,
+                    $donation->order_id
+                );
                 $remoteIdentity = $remoteSub['id'] ?? null;
                 $remoteAmount = $remoteSub['amount'] ?? null;
                 $remoteCurrency = $remoteSub['currency'] ?? null;
@@ -427,17 +579,19 @@ class MidtransPaymentService
                     : null;
                 $expectedIntervalUnit = $donation->frequency === 'mingguan' ? 'week' : 'month';
                 $identityMatches = $remoteIdentity === $donation->subscription_id;
-                $amountMatches = !empty($remoteAmount)
-                    && $this->isExactAmountMatch($remoteAmount, (int) $donation->nominal);
-                $currencyMatches = !empty($remoteCurrency)
-                    && strtoupper((string) $remoteCurrency) === 'IDR';
-                $scheduleMatches = $remoteInterval === 1
+                $amountMatches = $this->isExactAmountMatch($remoteAmount, $donation->nominal);
+                $currencyMatches = is_string($remoteCurrency)
+                    && strtoupper(trim($remoteCurrency)) === 'IDR';
+                $scheduleMatches = (($remoteInterval === 1) || ($remoteInterval === '1'))
+                    && is_string($remoteIntervalUnit)
                     && $remoteIntervalUnit === $expectedIntervalUnit;
-                $statusMatches = in_array(strtolower((string) $remoteStatus), ['active', 'pending'], true);
+                $statusMatches = is_string($remoteStatus)
+                    && in_array(strtolower(trim($remoteStatus)), ['active', 'pending'], true);
 
                 if ($identityMatches && $amountMatches && $currencyMatches && $scheduleMatches && $statusMatches) {
+                    $scheduleService = $this->scheduleService();
                     $intervalUnit  = ($donation->frequency === 'mingguan') ? 'week' : 'month';
-                    $nextCycleTime = ($donation->frequency === 'mingguan') ? now()->addWeek() : now()->addMonth();
+                    $normalizedRemoteStatus = strtolower(trim($remoteStatus));
 
                     $providerToken = $remoteSub['saved_token_id'] ?? null;
                     $providerToken = is_string($providerToken) ? trim($providerToken) : null;
@@ -459,44 +613,129 @@ class MidtransPaymentService
                         $metadata['token_status'] = 'verified_saved_token';
                     }
 
+                    $parsedRecoverySchedule = $scheduleService->parseMidtransSubscriptionScheduleTimestamp(
+                        is_array($remoteSchedule) ? ($remoteSchedule['next_execution_at'] ?? null) : null,
+                        SubscriptionScheduleService::SOURCE_MIDTRANS_SUBSCRIPTION_GET
+                    );
+                    $metadata['schedule'] = $scheduleService->buildScheduleMetadata($parsedRecoverySchedule);
+
                     $attributes = [
-                        'nominal'           => (int) ($remoteSub['amount'] ?? $donation->nominal),
+                        'nominal'           => $validatedLocalNominal,
                         'frequency'         => $donation->frequency,
-                        'interval'          => (int) ($remoteSchedule['interval'] ?? 1),
+                        'interval'          => (int) $remoteInterval,
                         'interval_unit'     => $intervalUnit,
                         'payment_type'      => strtolower((string) ($remoteSub['payment_type'] ?? 'credit_card')),
-                        'status'            => strtolower((string) $remoteStatus),
+                        'status'            => $normalizedRemoteStatus,
                         'is_anonim'         => (bool) $donation->is_anonim,
                         'idempotency_key'   => $remoteSub['metadata']['idempotency_key'] ?? $donation->idempotency_key,
-                        'next_execution_at' => isset($remoteSub['schedule']['next_execution_at'])
-                            ? \Carbon\Carbon::parse($remoteSub['schedule']['next_execution_at'])
-                            : $nextCycleTime,
+                        'next_execution_at' => $parsedRecoverySchedule['valid'] ? $parsedRecoverySchedule['utc'] : null,
                         'metadata'          => $metadata,
                     ];
                     if ($providerToken !== null) {
                         $attributes['token'] = $providerToken;
                     }
 
-                    $sub = $existingSub;
-                    if ($sub) {
-                        $sub->update($attributes);
-                    } else {
-                        $sub = Subscription::create(array_merge([
-                            'subscription_id' => $remoteSub['id'],
-                            'user_id'         => $donation->user_id,
-                            'campaign_id'     => $donation->campaign_id,
-                        ], $attributes));
+                    $recoveryOutcome = DB::transaction(function () use (
+                        $donation, $remoteSub, $remoteAmount, $attributes, $providerToken, $parsedRecoverySchedule
+                    ): array {
+                        $lockedDonation = Donation::where('id', $donation->id)->lockForUpdate()->first();
+                        if (!$lockedDonation) {
+                            return ['status' => 'amount_mismatch', 'subscription' => null];
+                        }
+
+                        if ($lockedDonation->status !== 'terverifikasi') {
+                            return ['status' => 'not_verified', 'subscription' => null];
+                        }
+
+                        if (!empty($lockedDonation->subscription_id) && $lockedDonation->subscription_id !== $remoteSub['id']) {
+                            return ['status' => 'identity_conflict', 'subscription' => null];
+                        }
+
+                        $lockedNominal = $this->normalizeStrictWholeIdrAmount($lockedDonation->nominal);
+                        if ($lockedNominal === null || !$this->isExactAmountMatch($remoteAmount, $lockedNominal)) {
+                            return ['status' => 'amount_mismatch', 'subscription' => null];
+                        }
+
+                        $attributes['nominal'] = $lockedNominal;
+                        $sub = Subscription::where('subscription_id', $remoteSub['id'])->lockForUpdate()->first();
+                        if ($sub) {
+                            if (!$this->isExistingSubscriptionCompatibleWithDonation($sub, $lockedDonation, $lockedNominal)) {
+                                return ['status' => 'identity_conflict', 'subscription' => null];
+                            }
+
+                            if ($this->isSubscriptionProtectedFromRecovery($sub)) {
+                                return ['status' => 'protected_state', 'subscription' => null];
+                            }
+
+                            $existingMeta = is_array($sub->metadata) ? $sub->metadata : [];
+                            $existingScheduleMeta = is_array($existingMeta['schedule'] ?? null) ? $existingMeta['schedule'] : [];
+                            $existingCanonical = ($existingScheduleMeta['next_execution_source'] ?? null) === 'provider_confirmed'
+                                ? $this->scheduleService()->parseProviderTimestamp($existingScheduleMeta['next_execution_utc'] ?? null)
+                                : ['valid' => false];
+                            if (!$parsedRecoverySchedule['valid'] && $existingCanonical['valid'] && $sub->next_execution_at !== null) {
+                                $attributes['next_execution_at'] = $sub->next_execution_at;
+                                $attributes['metadata']['schedule'] = $this->scheduleService()->markPreservedScheduleStale(
+                                    $existingScheduleMeta,
+                                    $parsedRecoverySchedule
+                                );
+                            }
+
+                            $mergedMetadata = array_merge($existingMeta, $attributes['metadata']);
+                            $sub->update(array_merge($attributes, ['metadata' => $mergedMetadata]));
+                        } else {
+                            $sub = Subscription::create(array_merge([
+                                'subscription_id' => $remoteSub['id'],
+                                'user_id'         => $lockedDonation->user_id,
+                                'campaign_id'     => $lockedDonation->campaign_id,
+                            ], $attributes));
+                        }
+
+                        $lockedDonation->update([
+                            'payment_status_detail' => $providerToken === null
+                                ? 'subscription_recovered_missing_saved_token'
+                                : 'subscription_activated',
+                        ]);
+
+                        return ['status' => 'ok', 'subscription' => $sub];
+                    });
+
+                    if ($recoveryOutcome['status'] === 'not_verified') {
+                        return [
+                            'success'      => false,
+                            'subscription' => null,
+                            'recoverable'  => false,
+                            'message'      => 'Pembayaran awal belum berstatus terverifikasi untuk pemulihan langganan.',
+                        ];
                     }
 
-                    $donation->update([
-                        'payment_status_detail' => $providerToken === null
-                            ? 'subscription_recovered_missing_saved_token'
-                            : 'subscription_activated',
-                    ]);
+                    if ($recoveryOutcome['status'] === 'protected_state' || $recoveryOutcome['status'] === 'identity_conflict') {
+                        Log::warning('Midtrans subscription recovery aborted in locked check', [
+                            'subscription_id' => $donation->subscription_id,
+                            'reason' => $recoveryOutcome['status'],
+                        ]);
+                        return [
+                            'success'      => false,
+                            'subscription' => null,
+                            'recoverable'  => false,
+                            'message'      => $recoveryOutcome['status'] === 'protected_state'
+                                ? 'Langganan lokal sudah dikelola atau sedang dalam operasi manajemen; pemulihan dibatalkan untuk melindungi status langganan.'
+                                : 'Subscription lokal tidak sesuai dengan pemilik atau parameter donasi.',
+                        ];
+                    }
+
+                    $recoveredSub = $recoveryOutcome['subscription'];
+                    if ($recoveredSub === null) {
+                        return [
+                            'success'      => false,
+                            'subscription' => null,
+                            'recoverable'  => true,
+                            'message'      => 'Nominal donasi lokal tidak konsisten saat pemulihan langganan.',
+                        ];
+                    }
 
                     return [
                         'success'      => true,
-                        'subscription' => $sub,
+                        'subscription' => $recoveredSub,
                         'message'      => $providerToken === null
                             ? 'Langganan aktif berhasil dipulihkan; saved_token_id lokal belum tersedia dari penyedia.'
                             : 'Langganan berhasil dipulihkan dan disinkronkan dari penyedia.',
@@ -527,10 +766,12 @@ class MidtransPaymentService
         }
 
         // 2. Verifikasi status pembayaran awal ke provider (DILAKUKAN DI LUAR DATABASE TRANSACTION)
+        // Kontrak Section 8.1: kepemilikan savedTokenId + nominal lokal saja tidak diperlakukan sebagai bukti pembayaran;
+        // bila bukti nominal terverifikasi eksplisit belum tersedia, wajib memeriksa Status API otoritatif.
         $verifiedToken = $savedTokenId;
-        if ($donation->status !== 'terverifikasi' || empty($verifiedToken)) {
+        if ($donation->status !== 'terverifikasi' || empty($verifiedToken) || $verifiedPaymentSnapshot === null) {
             try {
-                $remoteStatus = $this->checkTransactionStatus($donation->order_id);
+                $remoteStatus = $this->checkTransactionStatus($donation->order_id, $donation->id ? (int) $donation->id : null);
             } catch (MidtransConnectionException $e) {
                 Log::error('Timeout saat verifikasi status pembayaran awal ke provider', [
                     'order_id' => $donation->order_id,
@@ -573,19 +814,52 @@ class MidtransPaymentService
                 ];
             }
 
-            // B. Jika transaksi ditolak / gagal
+            // B. Jika transaksi ditolak / gagal: wajib bukti order, mata uang, & nominal terverifikasi sebelum mutasi (C3, D0.1)
             if (in_array($remoteTxStatus, ['deny', 'cancel', 'expire'], true) || $remoteFraud === 'deny') {
-                DB::transaction(function () use ($donation) {
-                    Donation::where('id', $donation->id)->update([
-                        'status'                => 'gagal',
-                        'payment_status_detail' => 'charge_denied',
-                        'webhook_processed_at'  => now(),
+                $isVerifiedFailure = $this->validateProviderFailure($remoteStatus, $donation)
+                    || (
+                        $remoteTxStatus === 'capture'
+                        && $remoteFraud === 'deny'
+                        && !empty($remoteOrderId)
+                        && $remoteOrderId === $donation->order_id
+                        && $this->isExactAmountMatch($remoteAmount, $donation->nominal)
+                        && $this->isOptionalIdrCurrencyValid($remoteStatus)
+                        && !empty($remoteCode)
+                        && $this->isStatusCodeConsistent($remoteCode, 'capture')
+                    );
+
+                if (!$isVerifiedFailure) {
+                    return [
+                        'success'      => false,
+                        'subscription' => null,
+                        'message'      => 'Respons penolakan pembayaran awal tidak lengkap atau nominal tidak sesuai.',
+                    ];
+                }
+
+                $markedFailed = DB::transaction(function () use ($donation, $remoteAmount, $remoteTxStatus, $remoteFraud): bool {
+                    $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
+                    if (!$locked || $locked->status === 'terverifikasi') {
+                        return false;
+                    }
+                    if (!$this->isExactAmountMatch($remoteAmount, $locked->nominal)) {
+                        return false;
+                    }
+                    $locked->update([
+                        'status'                     => 'gagal',
+                        'payment_status_detail'      => 'charge_denied',
+                        'webhook_processed_at'       => now(),
+                        'webhook_transaction_status' => is_string($remoteTxStatus) ? $remoteTxStatus : null,
+                        'webhook_fraud_status'       => is_string($remoteFraud) ? $remoteFraud : null,
                     ]);
+                    return true;
                 });
+
                 return [
                     'success'      => false,
                     'subscription' => null,
-                    'message'      => 'Otorisasi pembayaran awal ditolak oleh penyedia.',
+                    'message'      => $markedFailed
+                        ? 'Otorisasi pembayaran awal ditolak oleh penyedia.'
+                        : 'Status penolakan pembayaran awal tidak diterapkan karena status atau nominal lokal tidak sesuai.',
                 ];
             }
 
@@ -600,7 +874,7 @@ class MidtransPaymentService
             }
 
             // D. Validasi nominal eksak
-            if (empty($remoteAmount) || !$this->isExactAmountMatch($remoteAmount, (int) $donation->nominal)) {
+            if (!$this->isExactAmountMatch($remoteAmount, $donation->nominal)) {
                 return [
                     'success'      => false,
                     'subscription' => null,
@@ -608,8 +882,17 @@ class MidtransPaymentService
                 ];
             }
 
+            $verifiedPaymentSnapshot = $this->normalizeStrictWholeIdrAmount($remoteAmount);
+            if ($verifiedPaymentSnapshot === null) {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'message'      => 'Nominal pembayaran awal tidak valid untuk aktivasi langganan.',
+                ];
+            }
+
             // E. Validasi mata uang
-            if (!empty($remoteCurrency) && strtoupper($remoteCurrency) !== 'IDR') {
+            if (!$this->isOptionalIdrCurrencyValid($remoteStatus)) {
                 return [
                     'success'      => false,
                     'subscription' => null,
@@ -646,10 +929,13 @@ class MidtransPaymentService
 
             $verifiedToken = $providerSavedToken;
 
-            // Singkat & atomik: tandai donasi awal terverifikasi jika belum
-            DB::transaction(function () use ($donation, $remoteTxStatus, $remoteFraud) {
+            // Singkat & atomik: re-validasi nominal pada locked record, lalu tandai donasi awal terverifikasi jika belum
+            $lockedAmountValid = DB::transaction(function () use ($donation, $remoteTxStatus, $remoteFraud, $remoteAmount) {
                 $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
-                if ($locked && $locked->status !== 'terverifikasi') {
+                if (!$locked || !$this->isExactAmountMatch($remoteAmount, $locked->nominal)) {
+                    return false;
+                }
+                if ($locked->status !== 'terverifikasi') {
                     $locked->update([
                         'status'                     => 'terverifikasi',
                         'payment_status_detail'      => 'settled',
@@ -663,7 +949,16 @@ class MidtransPaymentService
                         app(CampaignProgressService::class)->recalculate($campaign);
                     }
                 }
+                return true;
             });
+
+            if (!$lockedAmountValid) {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'message'      => 'Nominal pembayaran awal tidak sesuai dengan data tagihan.',
+                ];
+            }
         }
 
         if (empty($verifiedToken)) {
@@ -679,6 +974,14 @@ class MidtransPaymentService
             ];
         }
 
+        if ($verifiedPaymentSnapshot === null) {
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'message'      => 'Bukti nominal pembayaran terverifikasi dari penyedia tidak tersedia.',
+            ];
+        }
+
         $user = User::find($donation->user_id);
         $campaign = Campaign::find($donation->campaign_id);
         if (!$user || !$campaign) {
@@ -689,46 +992,116 @@ class MidtransPaymentService
             ];
         }
 
+        $scheduleService = $this->scheduleService();
         $intervalUnit  = ($donation->frequency === 'mingguan') ? 'week' : 'month';
-        $nextCycleTime = ($donation->frequency === 'mingguan') ? now()->addWeek() : now()->addMonth();
-        $startTimeStr  = $nextCycleTime->format('Y-m-d H:i:s O');
+        $nextCycleTime = $scheduleService->calculateNextStartTime(now()->utc(), $donation->frequency);
+        $startTimeStr  = $scheduleService->formatOutboundStartTime($nextCycleTime);
 
         $subIdempotencyKey = $donation->idempotency_key
             ? str_replace('init_', '', $donation->idempotency_key)
             : substr(hash('sha256', 'wecare-subscription|' . $donation->order_id), 0, 36);
 
-        // 3. Cek jika Subscription dengan idempotency_key ini sudah dibuat
+        // 3. Cek jika Subscription dengan idempotency_key ini sudah dibuat (F1: konsistensi identitas & state terproteksi)
         $existingSub = Subscription::where('idempotency_key', $subIdempotencyKey)->first();
         if ($existingSub) {
-            DB::transaction(function () use ($donation, $existingSub) {
-                Donation::where('id', $donation->id)->update([
-                    'subscription_id'       => $existingSub->subscription_id,
+            $step3Outcome = DB::transaction(function () use ($donation, $existingSub, $verifiedPaymentSnapshot): array {
+                $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
+                $lockedSub = Subscription::whereKey($existingSub->id)->lockForUpdate()->first();
+                if (
+                    !$locked
+                    || !$lockedSub
+                    || $locked->status !== 'terverifikasi'
+                    || !$this->isExactAmountMatch($verifiedPaymentSnapshot, $locked->nominal)
+                    || !$this->isExistingSubscriptionCompatibleWithDonation($lockedSub, $locked, $verifiedPaymentSnapshot)
+                ) {
+                    return ['status' => 'mismatch', 'subscription' => null];
+                }
+
+                if (!$this->isSubscriptionActiveAndUnprotected($lockedSub)) {
+                    return ['status' => 'protected_or_inactive', 'subscription' => $lockedSub];
+                }
+
+                $locked->update([
+                    'subscription_id'       => $lockedSub->subscription_id,
                     'payment_status_detail' => 'subscription_activated',
                 ]);
+
+                return ['status' => 'ok', 'subscription' => $lockedSub];
             });
+
+            if ($step3Outcome['status'] === 'protected_or_inactive') {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => false,
+                    'message'      => 'Langganan yang sudah ada tidak aktif atau sedang dikelola; aktivasi ulang diblokir.',
+                ];
+            }
+
+            if ($step3Outcome['status'] !== 'ok' || !$step3Outcome['subscription']) {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => false,
+                    'message'      => 'Data langganan yang sudah ada tidak konsisten dengan nominal atau parameter donasi.',
+                ];
+            }
+
             return [
                 'success'      => true,
-                'subscription' => $existingSub,
+                'subscription' => $step3Outcome['subscription'],
                 'message'      => 'Langganan sudah aktif (idempotent).',
             ];
         }
 
-        // 4. State guard atomik untuk koordinasi concurrent request tanpa menahan row lock selama HTTP call
-        $stateAcquired = DB::transaction(function () use ($donation) {
+        // 4. State guard atomik untuk koordinasi concurrent request + verifikasi terhadap snapshot bukti bayar otoritatif (C4, D0.2, F1, F4)
+        $guardResult = DB::transaction(function () use ($donation, $verifiedPaymentSnapshot): array {
             $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
-            if (!$locked) return 'not_found';
-            if (!empty($locked->subscription_id)) return 'already_active';
+            if (!$locked) {
+                return ['state' => 'not_found', 'nominal' => null, 'subscription_id' => null];
+            }
+
+            if ($locked->status !== 'terverifikasi') {
+                return ['state' => 'not_verified', 'nominal' => null, 'subscription_id' => null];
+            }
+
+            $lockedNominal = $this->normalizeStrictWholeIdrAmount($locked->nominal);
+            if ($lockedNominal === null) {
+                return ['state' => 'invalid_nominal', 'nominal' => null, 'subscription_id' => null];
+            }
+
+            if ($verifiedPaymentSnapshot === null || $lockedNominal !== $verifiedPaymentSnapshot) {
+                return ['state' => 'amount_mismatch', 'nominal' => null, 'subscription_id' => null];
+            }
+
+            if (in_array($locked->payment_status_detail, [
+                'subscription_created_conflict_manual_review',
+                'subscription_created_protected_conflict',
+                'subscription_activation_ambiguous_manual_review',
+            ], true)) {
+                return ['state' => $locked->payment_status_detail === 'subscription_activation_ambiguous_manual_review' ? 'ambiguous_manual_review' : 'manual_review_required', 'nominal' => $lockedNominal, 'subscription_id' => $locked->subscription_id];
+            }
+
+            if (!empty($locked->subscription_id)) {
+                return ['state' => 'already_active', 'nominal' => $lockedNominal, 'subscription_id' => $locked->subscription_id];
+            }
+
             if ($locked->payment_status_detail === 'activation_in_progress') {
                 $leaseStartedAt = $locked->updated_at;
                 if ($leaseStartedAt && $leaseStartedAt->lte(now()->subMinutes(5))) {
-                    $locked->update(['payment_status_detail' => 'activation_in_progress']);
-                    return 'acquired';
+                    // Lease kadaluarsa tanpa subscription_id: jangan kirim POST baru secara otomatis (E5.2 4.3).
+                    $locked->update(['payment_status_detail' => 'subscription_activation_ambiguous_manual_review']);
+                    return ['state' => 'ambiguous_manual_review', 'nominal' => $lockedNominal, 'subscription_id' => null];
                 }
-                return 'in_progress';
+                return ['state' => 'in_progress', 'nominal' => $lockedNominal, 'subscription_id' => null];
             }
+
             $locked->update(['payment_status_detail' => 'activation_in_progress']);
-            return 'acquired';
+            return ['state' => 'acquired', 'nominal' => $lockedNominal, 'subscription_id' => null];
         });
+
+        $stateAcquired = $guardResult['state'];
+        $operationNominal = $guardResult['nominal'];
 
         if ($stateAcquired === 'not_found') {
             return [
@@ -738,16 +1111,89 @@ class MidtransPaymentService
             ];
         }
 
+        if ($stateAcquired === 'not_verified' || $stateAcquired === 'amount_mismatch') {
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'message'      => 'Nominal atau status donasi tidak konsisten dengan bukti pembayaran terverifikasi.',
+            ];
+        }
+
+        if ($stateAcquired === 'invalid_nominal' || $operationNominal === null) {
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'message'      => 'Nominal donasi lokal tidak valid untuk aktivasi langganan.',
+            ];
+        }
+
+        if ($stateAcquired === 'ambiguous_manual_review') {
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'recoverable'  => false,
+                'ambiguous'    => true,
+                'message'      => 'Status pembuatan langganan dari penyedia masih ambigu. Pembuatan ulang otomatis diblokir untuk mencegah langganan ganda.',
+            ];
+        }
+
+        if ($stateAcquired === 'manual_review_required') {
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'recoverable'  => false,
+                'message'      => 'Aktivasi langganan memerlukan pemeriksaan manual karena konflik data penyedia; pembuatan ulang otomatis diblokir.',
+            ];
+        }
+
         if ($stateAcquired === 'already_active') {
-            $donation->refresh();
-            $existingSub = Subscription::where('subscription_id', $donation->subscription_id)->first();
-            if ($existingSub) {
+            $alreadyOutcome = DB::transaction(function () use ($donation, $operationNominal): array {
+                $lockedDonation = Donation::where('id', $donation->id)->lockForUpdate()->first();
+                if (!$lockedDonation || empty($lockedDonation->subscription_id)) {
+                    return ['status' => 'missing_sub', 'subscription' => null];
+                }
+
+                $existingSub = Subscription::where('subscription_id', $lockedDonation->subscription_id)->lockForUpdate()->first();
+                if (!$existingSub) {
+                    return ['status' => 'missing_sub', 'subscription' => null];
+                }
+
+                if (!$this->isExistingSubscriptionCompatibleWithDonation($existingSub, $lockedDonation, $operationNominal)) {
+                    return ['status' => 'mismatch', 'subscription' => null];
+                }
+
+                if (!$this->isSubscriptionActiveAndUnprotected($existingSub)) {
+                    return ['status' => 'protected_or_inactive', 'subscription' => $existingSub];
+                }
+
+                return ['status' => 'ok', 'subscription' => $existingSub];
+            });
+
+            if ($alreadyOutcome['status'] === 'ok' && $alreadyOutcome['subscription']) {
                 return [
                     'success'      => true,
-                    'subscription' => $existingSub,
+                    'subscription' => $alreadyOutcome['subscription'],
                     'message'      => 'Langganan sudah aktif (idempotent).',
                 ];
             }
+
+            if ($alreadyOutcome['status'] === 'missing_sub') {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => true,
+                    'message'      => 'Langganan belum tersinkronisasi lokal; silakan lakukan pemulihan.',
+                ];
+            }
+
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'recoverable'  => false,
+                'message'      => $alreadyOutcome['status'] === 'protected_or_inactive'
+                    ? 'Langganan yang sudah ada tidak aktif atau sedang dikelola; aktivasi ulang diblokir.'
+                    : 'Data langganan yang sudah ada tidak konsisten dengan pemilik atau parameter donasi.',
+            ];
         }
 
         if ($stateAcquired === 'in_progress') {
@@ -773,40 +1219,115 @@ class MidtransPaymentService
             $subResult = $this->createSubscription(
                 $user,
                 $campaign,
-                (int) $donation->nominal,
+                $operationNominal,
                 $donation->frequency,
                 'credit_card',
                 $verifiedToken,
                 (bool) $donation->is_anonim,
                 $subIdempotencyKey,
-                ['start_time' => $startTimeStr]
+                [
+                    'start_time' => $startTimeStr,
+                    'local_donation_id' => $donation->id ? (int) $donation->id : null,
+                    'correlation_ref' => $donation->order_id,
+                ]
             );
-        } catch (MidtransConnectionException $e) {
-            // Provider timeout: JANGAN sentuh status terverifikasi donasi, tandai recoverable
+        } catch (MidtransSubscriptionResponseException $e) {
+            // Provider mengembalikan ID tetapi respons nominal tidak terverifikasi (TZ0.2: simpan bukti tanpa menimpa/mengaitkan konflik)
+            $createdSubId = $e->getProviderSubscriptionId();
+            if ($createdSubId) {
+                $evidenceOutcome = $this->recordCreatedSubscriptionExceptionEvidence(
+                    $donation,
+                    $createdSubId,
+                    $operationNominal,
+                    'subscription_response_amount_unverified_recoverable'
+                );
+
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => $evidenceOutcome !== 'manual_review',
+                    'message'      => $evidenceOutcome === 'manual_review'
+                        ? 'Langganan dibuat dengan konflik data lokal; ditandai untuk pemeriksaan manual tanpa pembuatan ulang.'
+                        : 'Respons pembuatan langganan dari penyedia tidak memuat nominal yang terverifikasi. Status disimpan untuk pemeriksaan ulang tanpa pembuatan ulang.',
+                ];
+            }
+
             DB::transaction(function () use ($donation) {
                 Donation::where('id', $donation->id)->update([
-                    'payment_status_detail' => 'subscription_activation_failed_recoverable',
+                    'payment_status_detail' => 'subscription_activation_ambiguous_manual_review',
                 ]);
             });
 
-            Log::error('Timeout saat createSubscription ke Midtrans (recoverable)', [
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'recoverable'  => false,
+                'ambiguous'    => true,
+                'message'      => 'Respons pembuatan langganan dari penyedia tidak memuat ID yang pasti. Pembayaran awal aman; pembuatan ulang otomatis diblokir.',
+            ];
+        } catch (MidtransConnectionException $e) {
+            // E5.2 4.3: Timeout/koneksi terputus tanpa ID provider berisiko POST sudah diproses di Midtrans -> blokir retry POST otomatis.
+            DB::transaction(function () use ($donation) {
+                Donation::where('id', $donation->id)->update([
+                    'payment_status_detail' => 'subscription_activation_ambiguous_manual_review',
+                ]);
+            });
+
+            Log::error('Timeout saat createSubscription ke Midtrans (ambiguous manual review)', [
                 'order_id' => $donation->order_id,
             ]);
 
             return [
                 'success'      => false,
                 'subscription' => null,
-                'recoverable'  => true,
-                'message'      => 'Koneksi ke gateway langganan mengalami timeout. Status pembayaran awal aman dan aktivasi dapat diverifikasi ulang.',
+                'recoverable'  => false,
+                'ambiguous'    => true,
+                'message'      => 'Koneksi ke gateway langganan mengalami timeout dan status pembuatan langganan belum pasti. Pembayaran awal Anda aman dan pengiriman ulang otomatis diblokir untuk mencegah langganan ganda.',
+            ];
+        } catch (MidtransApiException $e) {
+            $statusCode = (int) $e->getCode();
+            $isDefinitiveClientRejection = in_array($statusCode, [400, 401, 403, 404, 422], true);
+
+            DB::transaction(function () use ($donation, $isDefinitiveClientRejection) {
+                Donation::where('id', $donation->id)->update([
+                    'payment_status_detail' => $isDefinitiveClientRejection
+                        ? 'subscription_activation_failed_recoverable'
+                        : 'subscription_activation_ambiguous_manual_review',
+                ]);
+            });
+
+            Log::error('Error API saat createSubscription setelah initial charge berhasil', [
+                'order_id'    => $donation->order_id,
+                'donation_id' => $donation->id,
+                'status_code' => $statusCode,
+                'definitive_rejection' => $isDefinitiveClientRejection,
+            ]);
+
+            if ($isDefinitiveClientRejection) {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => true,
+                    'ambiguous'    => false,
+                    'message'      => 'Pembayaran awal berhasil, namun permintaan langganan ditolak sebelum dibuat. Status dapat diverifikasi ulang tanpa penagihan ulang.',
+                ];
+            }
+
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'recoverable'  => false,
+                'ambiguous'    => true,
+                'message'      => 'Gateway langganan mengembalikan respons yang belum pasti. Pembayaran awal aman dan pembuatan ulang otomatis diblokir.',
             ];
         } catch (\Throwable $e) {
             DB::transaction(function () use ($donation) {
                 Donation::where('id', $donation->id)->update([
-                    'payment_status_detail' => 'subscription_activation_failed_recoverable',
+                    'payment_status_detail' => 'subscription_activation_ambiguous_manual_review',
                 ]);
             });
 
-            Log::error('Gagal membuat langganan setelah initial charge berhasil (recoverable)', [
+            Log::error('Gagal tak terduga saat createSubscription setelah initial charge berhasil (ambiguous)', [
                 'order_id'    => $donation->order_id,
                 'donation_id' => $donation->id,
                 'error'       => $e->getMessage(),
@@ -815,24 +1336,128 @@ class MidtransPaymentService
             return [
                 'success'      => false,
                 'subscription' => null,
-                'recoverable'  => true,
-                'message'      => 'Pembayaran awal berhasil, namun pembuatan jadwal langganan otomatis mengalami kendala sementara. Status dapat dipulihkan tanpa penagihan ulang.',
+                'recoverable'  => false,
+                'ambiguous'    => true,
+                'message'      => 'Pembayaran awal berhasil, namun status pembuatan jadwal langganan belum pasti. Pembuatan ulang otomatis diblokir untuk mencegah langganan ganda.',
             ];
         }
 
-        // 6. Simpan record Subscription lokal secara atomik dalam transaksi database singkat
+        if (!$this->isExactAmountMatch($subResult['amount'] ?? null, $operationNominal)) {
+            $createdSubId = is_string($subResult['id'] ?? null) ? trim($subResult['id']) : null;
+            $evidenceOutcome = $this->recordCreatedSubscriptionExceptionEvidence(
+                $donation,
+                $createdSubId,
+                $operationNominal,
+                'subscription_response_amount_unverified_recoverable'
+            );
+
+            return [
+                'success'      => false,
+                'subscription' => null,
+                'recoverable'  => $evidenceOutcome !== 'manual_review',
+                'message'      => $evidenceOutcome === 'manual_review'
+                    ? 'Langganan dibuat dengan konflik data lokal; ditandai untuk pemeriksaan manual tanpa pembuatan ulang.'
+                    : 'Respons pembuatan langganan dari penyedia tidak memuat nominal yang terverifikasi. Status disimpan untuk pemeriksaan ulang tanpa pembuatan ulang.',
+            ];
+        }
+
+        // 6. Simpan record Subscription lokal secara atomik dalam transaksi database singkat (C4, F4, TZ0.2)
         try {
-            $subscription = DB::transaction(function () use (
+            $persistenceOutcome = DB::transaction(function () use (
                 $subResult, $donation, $user, $campaign, $verifiedToken,
-                $intervalUnit, $nextCycleTime, $subIdempotencyKey
-            ) {
-                $sub = Subscription::where('subscription_id', $subResult['id'])->first();
+                $intervalUnit, $nextCycleTime, $subIdempotencyKey, $operationNominal
+            ): array {
+                $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
+                if (!$locked || $locked->status !== 'terverifikasi' || !$this->isExactAmountMatch($operationNominal, $locked->nominal)) {
+                    if ($locked) {
+                        $createdSubId = is_string($subResult['id'] ?? null) ? trim($subResult['id']) : null;
+                        $existingConflictSub = $createdSubId
+                            ? Subscription::where('subscription_id', $createdSubId)->lockForUpdate()->first()
+                            : null;
+                        $hasDonationConflict = !empty($createdSubId) && !empty($locked->subscription_id) && $locked->subscription_id !== $createdSubId;
+                        $hasSubConflict = $existingConflictSub !== null && (
+                            !$this->isExistingSubscriptionCompatibleWithDonation($existingConflictSub, $locked, $operationNominal)
+                            || $this->isSubscriptionProtectedFromRecovery($existingConflictSub)
+                        );
+                        if ($hasDonationConflict || $hasSubConflict) {
+                            $locked->update(['payment_status_detail' => 'subscription_created_conflict_manual_review']);
+                            return ['status' => 'identity_conflict', 'subscription' => null];
+                        }
+                        $updates = ['payment_status_detail' => 'subscription_local_amount_mismatch_recoverable'];
+                        if ($createdSubId && empty($locked->subscription_id)) {
+                            $updates['subscription_id'] = $createdSubId;
+                        }
+                        $locked->update($updates);
+                    }
+                    return ['status' => 'amount_mismatch', 'subscription' => null];
+                }
+
+                if (!empty($locked->subscription_id) && $locked->subscription_id !== $subResult['id']) {
+                    $locked->update([
+                        'payment_status_detail' => 'subscription_created_conflict_manual_review',
+                    ]);
+                    return ['status' => 'existing_donation_subscription_conflict', 'subscription' => null];
+                }
+
+                $sub = Subscription::where('subscription_id', $subResult['id'])->lockForUpdate()->first();
+                if ($sub) {
+                    if (
+                        (int) $sub->user_id !== (int) $locked->user_id
+                        || (int) $sub->campaign_id !== (int) $locked->campaign_id
+                        || $sub->frequency !== $locked->frequency
+                    ) {
+                        $locked->update([
+                            'payment_status_detail' => 'subscription_created_conflict_manual_review',
+                        ]);
+                        return ['status' => 'identity_conflict', 'subscription' => null];
+                    }
+
+                    if ($this->isSubscriptionProtectedFromRecovery($sub)) {
+                        $updates = ['payment_status_detail' => 'subscription_created_protected_conflict'];
+                        if (empty($locked->subscription_id)) {
+                            $updates['subscription_id'] = $sub->subscription_id;
+                        }
+                        $locked->update($updates);
+                        return ['status' => 'protected_state', 'subscription' => null];
+                    }
+
+                    if (!$this->isExactAmountMatch($operationNominal, $sub->nominal)) {
+                        $updates = ['payment_status_detail' => 'subscription_local_amount_mismatch_recoverable'];
+                        if (empty($locked->subscription_id)) {
+                            $updates['subscription_id'] = $sub->subscription_id;
+                        }
+                        $locked->update($updates);
+                        return ['status' => 'amount_mismatch', 'subscription' => null];
+                    }
+                }
+
                 if (!$sub) {
+                    $scheduleService = $this->scheduleService();
+                    $remoteCreateSchedule = is_array($subResult['schedule'] ?? null) ? $subResult['schedule'] : null;
+                    $rawCreateNextExec = $remoteCreateSchedule !== null ? ($remoteCreateSchedule['next_execution_at'] ?? null) : null;
+
+                    if ($this->isCreateSubscriptionScheduleContextTrusted($subResult, $intervalUnit, $operationNominal)) {
+                        $parsedCreateSchedule = $scheduleService->parseMidtransSubscriptionScheduleTimestamp(
+                            $rawCreateNextExec,
+                            SubscriptionScheduleService::SOURCE_MIDTRANS_SUBSCRIPTION_CREATE
+                        );
+                    } else {
+                        $parsedCreateSchedule = [
+                            'valid' => false,
+                            'utc' => null,
+                            'status' => $rawCreateNextExec === null ? 'unavailable' : 'invalid',
+                            'reason' => $rawCreateNextExec === null ? 'missing_timestamp' : 'unverified_create_schedule_context',
+                        ];
+                    }
+
+                    $createMetadata = is_array($subResult['metadata'] ?? null) ? $subResult['metadata'] : [];
+                    $createMetadata['schedule'] = $scheduleService->buildScheduleMetadata($parsedCreateSchedule, $nextCycleTime);
+
                     $sub = Subscription::create([
                         'subscription_id'   => $subResult['id'],
                         'user_id'           => $user->id,
                         'campaign_id'       => $campaign->id,
-                        'nominal'           => (int) $donation->nominal,
+                        'nominal'           => $operationNominal,
                         'frequency'         => $donation->frequency,
                         'interval'          => 1,
                         'interval_unit'     => $intervalUnit,
@@ -841,20 +1466,43 @@ class MidtransPaymentService
                         'status'            => $subResult['status'] ?? 'active',
                         'is_anonim'         => (bool) $donation->is_anonim,
                         'idempotency_key'   => $subIdempotencyKey,
-                        'next_execution_at' => isset($subResult['schedule']['next_execution_at'])
-                            ? \Carbon\Carbon::parse($subResult['schedule']['next_execution_at'])
-                            : $nextCycleTime,
-                        'metadata'          => $subResult['metadata'] ?? [],
+                        'next_execution_at' => $parsedCreateSchedule['valid'] ? $parsedCreateSchedule['utc'] : null,
+                        'metadata'          => $createMetadata,
                     ]);
                 }
 
-                Donation::where('id', $donation->id)->update([
+                $locked->update([
                     'subscription_id'       => $sub->subscription_id,
                     'payment_status_detail' => 'subscription_activated',
                 ]);
 
-                return $sub;
+                return ['status' => 'ok', 'subscription' => $sub];
             });
+
+            if (in_array($persistenceOutcome['status'], ['existing_donation_subscription_conflict', 'identity_conflict', 'protected_state'], true)) {
+                Log::warning('Midtrans Subscription created on provider but local binding blocked safely (F4)', [
+                    'order_id'                 => $donation->order_id,
+                    'provider_subscription_id' => $subResult['id'] ?? null,
+                    'reason'                   => $persistenceOutcome['status'],
+                ]);
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => false,
+                    'message'      => 'Langganan lokal sudah dikelola atau tidak sesuai dengan donasi; sinkronisasi dibatalkan untuk melindungi status langganan.',
+                ];
+            }
+
+            if ($persistenceOutcome['status'] !== 'ok' || !$persistenceOutcome['subscription']) {
+                return [
+                    'success'      => false,
+                    'subscription' => null,
+                    'recoverable'  => true,
+                    'message'      => 'Langganan dibuat di penyedia tetapi nominal lokal tidak konsisten; sinkronisasi ditunda untuk pemeriksaan ulang.',
+                ];
+            }
+
+            $subscription = $persistenceOutcome['subscription'];
 
             Log::info('Midtrans Subscription activated successfully after initial charge', [
                 'order_id'        => $donation->order_id,
@@ -867,46 +1515,108 @@ class MidtransPaymentService
                 'message'      => 'Donasi rutin berhasil diaktifkan.',
             ];
         } catch (\Throwable $dbEx) {
-            // Skenario: Provider create success, tapi penyimpanan lokal gagal
+            // Skenario: Provider create success, tapi penyimpanan lokal gagal (F4: pertahankan bukti secara aman tanpa menimpa ID lain/asing)
             Log::error('Gagal menyimpan subscription lokal setelah provider create berhasil', [
                 'order_id'        => $donation->order_id,
                 'subscription_id' => $subResult['id'] ?? null,
             ]);
 
-            if (!empty($subResult['id'])) {
-                try {
-                    Donation::where('id', $donation->id)->update([
-                        'subscription_id'       => $subResult['id'],
-                        'payment_status_detail' => 'subscription_local_save_failed_recoverable',
-                    ]);
-                } catch (\Throwable $e2) {
-                    // ignore
-                }
-            }
+            $createdSubId = is_string($subResult['id'] ?? null) ? trim($subResult['id']) : null;
+            $evidenceOutcome = $this->recordCreatedSubscriptionExceptionEvidence(
+                $donation,
+                $createdSubId,
+                $operationNominal,
+                'subscription_local_save_failed_recoverable'
+            );
 
             return [
                 'success'      => false,
                 'subscription' => null,
-                'recoverable'  => true,
-                'message'      => 'Langganan berhasil dibuat di penyedia, sinkronisasi data lokal tertunda. Silakan verifikasi ulang.',
+                'recoverable'  => $evidenceOutcome !== 'manual_review',
+                'message'      => $evidenceOutcome === 'manual_review'
+                    ? 'Langganan dibuat dengan konflik data lokal; ditandai untuk pemeriksaan manual tanpa pembuatan ulang.'
+                    : 'Langganan berhasil dibuat di penyedia, sinkronisasi data lokal tertunda. Silakan verifikasi ulang.',
             ];
+        }
+    }
+
+    /**
+     * Mencatat bukti pembuatan subscription di jalur error/exception tanpa menimpa subscription_id berbeda
+     * atau mengaitkan Subscription lokal yang konflik/terproteksi (F4, TZ0.2).
+     */
+    protected function recordCreatedSubscriptionExceptionEvidence(
+        Donation $donation,
+        ?string $createdSubId,
+        string $operationNominal,
+        string $defaultDetail
+    ): string {
+        $normalizedCreatedId = is_string($createdSubId) && trim($createdSubId) !== ''
+            ? trim($createdSubId)
+            : null;
+
+        try {
+            return DB::transaction(function () use ($donation, $normalizedCreatedId, $operationNominal, $defaultDetail): string {
+                $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
+                if (!$locked) {
+                    return 'recoverable';
+                }
+
+                $existingSub = $normalizedCreatedId
+                    ? Subscription::where('subscription_id', $normalizedCreatedId)->lockForUpdate()->first()
+                    : null;
+
+                $hasDonationSubConflict = $normalizedCreatedId !== null
+                    && !empty($locked->subscription_id)
+                    && $locked->subscription_id !== $normalizedCreatedId;
+
+                $hasSubConflict = $existingSub !== null && (
+                    !$this->isExistingSubscriptionCompatibleWithDonation($existingSub, $locked, $operationNominal)
+                    || $this->isSubscriptionProtectedFromRecovery($existingSub)
+                );
+
+                if ($hasDonationSubConflict || $hasSubConflict) {
+                    $locked->update([
+                        'payment_status_detail' => 'subscription_created_conflict_manual_review',
+                    ]);
+                    return 'manual_review';
+                }
+
+                $updates = ['payment_status_detail' => $defaultDetail];
+                if ($normalizedCreatedId !== null && empty($locked->subscription_id)) {
+                    $updates['subscription_id'] = $normalizedCreatedId;
+                }
+                $locked->update($updates);
+                return 'recoverable';
+            });
+        } catch (\Throwable $e) {
+            return 'recoverable';
         }
     }
 
     /**
      * Mengambil detail langganan dari Midtrans.
      */
-    public function getSubscription(string $subscriptionId): array
-    {
+    public function getSubscription(
+        string $subscriptionId,
+        ?int $localSubscriptionId = null,
+        ?int $localDonationId = null,
+        ?string $correlationRef = null
+    ): array {
         if (!$this->isConfigured()) {
             throw new MidtransConfigurationException('Midtrans Server Key belum dikonfigurasi.');
         }
 
         try {
-            $response = Http::withBasicAuth($this->serverKey, '')
-                ->withHeaders(['Accept' => 'application/json'])
-                ->timeout(10)
-                ->get("{$this->subscriptionApiUrl}/{$subscriptionId}");
+            $response = $this->httpObservability()->observe(
+                'subscription_get',
+                fn () => Http::withBasicAuth($this->serverKey, '')
+                    ->withHeaders(['Accept' => 'application/json'])
+                    ->timeout(10)
+                    ->get("{$this->subscriptionApiUrl}/{$subscriptionId}"),
+                localSubscriptionId: $localSubscriptionId,
+                localDonationId: $localDonationId,
+                correlationRef: $correlationRef
+            );
 
             if ($response->failed()) {
                 throw new MidtransApiException('Gagal mengambil data langganan dari Midtrans.', $response->status());
@@ -918,22 +1628,22 @@ class MidtransPaymentService
         }
     }
 
-    public function disableSubscription(string $subscriptionId): array
+    public function disableSubscription(string $subscriptionId, ?int $localSubscriptionId = null): array
     {
-        return $this->mutateSubscription($subscriptionId, 'disable');
+        return $this->mutateSubscription($subscriptionId, 'disable', $localSubscriptionId);
     }
 
-    public function enableSubscription(string $subscriptionId): array
+    public function enableSubscription(string $subscriptionId, ?int $localSubscriptionId = null): array
     {
-        return $this->mutateSubscription($subscriptionId, 'enable');
+        return $this->mutateSubscription($subscriptionId, 'enable', $localSubscriptionId);
     }
 
-    public function cancelSubscription(string $subscriptionId): array
+    public function cancelSubscription(string $subscriptionId, ?int $localSubscriptionId = null): array
     {
-        return $this->mutateSubscription($subscriptionId, 'cancel');
+        return $this->mutateSubscription($subscriptionId, 'cancel', $localSubscriptionId);
     }
 
-    protected function mutateSubscription(string $subscriptionId, string $operation): array
+    protected function mutateSubscription(string $subscriptionId, string $operation, ?int $localSubscriptionId = null): array
     {
         if (!$this->isConfigured()) {
             throw new MidtransConfigurationException('Midtrans Server Key belum dikonfigurasi.');
@@ -946,10 +1656,14 @@ class MidtransPaymentService
         }
 
         try {
-            $response = Http::withBasicAuth($this->serverKey, '')
-                ->withHeaders(['Accept' => 'application/json'])
-                ->timeout(15)
-                ->post("{$this->subscriptionApiUrl}/{$subscriptionId}/{$operation}");
+            $response = $this->httpObservability()->observe(
+                'subscription_' . $operation,
+                fn () => Http::withBasicAuth($this->serverKey, '')
+                    ->withHeaders(['Accept' => 'application/json'])
+                    ->timeout(15)
+                    ->post("{$this->subscriptionApiUrl}/{$subscriptionId}/{$operation}"),
+                localSubscriptionId: $localSubscriptionId
+            );
 
             if ($response->status() === 401 || $response->status() === 403) {
                 throw new MidtransApiException('Otorisasi provider subscription ditolak.', $response->status());
@@ -979,19 +1693,24 @@ class MidtransPaymentService
      * @throws MidtransConfigurationException
      * @throws MidtransConnectionException
      */
-    public function checkTransactionStatus(string $orderId): array
+    public function checkTransactionStatus(string $orderId, ?int $localDonationId = null): array
     {
         if (!$this->isConfigured()) {
             throw new MidtransConfigurationException('Midtrans Server Key belum dikonfigurasi.');
         }
 
         try {
-            $response = Http::withBasicAuth($this->serverKey, '')
-                ->withHeaders([
-                    'Accept' => 'application/json',
-                ])
-                ->timeout(10)
-                ->get("{$this->statusApiUrl}/{$orderId}/status");
+            $response = $this->httpObservability()->observe(
+                'transaction_get_status',
+                fn () => Http::withBasicAuth($this->serverKey, '')
+                    ->withHeaders([
+                        'Accept' => 'application/json',
+                    ])
+                    ->timeout(10)
+                    ->get("{$this->statusApiUrl}/{$orderId}/status"),
+                localDonationId: $localDonationId,
+                correlationRef: $orderId
+            );
 
             if ($response->status() === 404) {
                 return [
@@ -1043,6 +1762,122 @@ class MidtransPaymentService
         }
     }
 
+    protected function httpObservability(): MidtransHttpObservability
+    {
+        return app(MidtransHttpObservability::class);
+    }
+
+    protected function scheduleService(): SubscriptionScheduleService
+    {
+        return app(SubscriptionScheduleService::class);
+    }
+
+    /**
+     * Memvalidasi kesesuaian konteks respons Create Subscription (nominal, mata uang, status, interval)
+     * sebelum mempercayai timestamp jadwal yang dikembalikan penyedia.
+     */
+    protected function isCreateSubscriptionScheduleContextTrusted(
+        array $subResult,
+        string $expectedIntervalUnit,
+        mixed $expectedNominal
+    ): bool {
+        if (!$this->isExactAmountMatch($subResult['amount'] ?? null, $expectedNominal)) {
+            return false;
+        }
+
+        if (array_key_exists('currency', $subResult) && $subResult['currency'] !== null) {
+            if (!is_string($subResult['currency']) || strtoupper(trim($subResult['currency'])) !== 'IDR') {
+                return false;
+            }
+        }
+
+        $remoteStatus = $subResult['status'] ?? null;
+        if (!is_string($remoteStatus) || !in_array(strtolower(trim($remoteStatus)), ['active', 'pending'], true)) {
+            return false;
+        }
+
+        $remoteSchedule = $subResult['schedule'] ?? null;
+        if (!is_array($remoteSchedule)) {
+            return false;
+        }
+
+        $remoteInterval = $remoteSchedule['interval'] ?? null;
+        $remoteIntervalUnit = $remoteSchedule['interval_unit'] ?? null;
+
+        $intervalMatches = ($remoteInterval === 1) || ($remoteInterval === '1');
+        $unitMatches = is_string($remoteIntervalUnit)
+            && strtolower(trim($remoteIntervalUnit)) === strtolower(trim($expectedIntervalUnit));
+
+        return $intervalMatches && $unitMatches;
+    }
+
+    /**
+     * Memeriksa kesesuaian identitas, campaign, frekuensi, nominal, dan keterkaitan subscription_id
+     * antara Subscription yang sudah ada dan record Donation awal (F1, F4).
+     */
+    protected function isExistingSubscriptionCompatibleWithDonation(
+        Subscription $sub,
+        Donation $donation,
+        mixed $expectedNominal = null
+    ): bool {
+        if (
+            (int) $sub->user_id !== (int) $donation->user_id
+            || (int) $sub->campaign_id !== (int) $donation->campaign_id
+            || $sub->frequency !== $donation->frequency
+        ) {
+            return false;
+        }
+
+        if (!$this->isExactAmountMatch($sub->nominal, $expectedNominal ?? $donation->nominal)) {
+            return false;
+        }
+
+        return empty($donation->subscription_id) || $donation->subscription_id === $sub->subscription_id;
+    }
+
+    /**
+     * Memeriksa apakah record Subscription lokal benar-benar aktif dan tidak sedang terproteksi/dikelola (F1).
+     */
+    protected function isSubscriptionActiveAndUnprotected(Subscription $sub): bool
+    {
+        return !$this->isSubscriptionProtectedFromRecovery($sub)
+            && strtolower(trim((string) $sub->status)) === 'active';
+    }
+
+    /**
+     * Memeriksa apakah record Subscription lokal berada dalam status manajemen/guard yang dilindungi
+     * sehingga alur recovery tidak boleh menimpa status, metadata pembatalan, atau lock operasinya (D6, F3).
+     *
+     * Catatan F3: Keterlambatan/kedaluwarsaan lease tidak mencabut kepemilikan guard secara otomatis;
+     * selama operation_guard_owner masih terisi, recovery tidak boleh memutasi ataupun menghapus guard tersebut.
+     */
+    protected function isSubscriptionProtectedFromRecovery(Subscription $sub): bool
+    {
+        if (in_array($sub->management_state, ['cancelled', 'paused', 'reconciliation'], true)) {
+            return true;
+        }
+
+        if (is_array($sub->metadata) && array_key_exists('cancellation', $sub->metadata)) {
+            return true;
+        }
+
+        return !empty($sub->operation_guard_owner);
+    }
+
+    /**
+     * Memvalidasi mata uang respons provider bersifat IDR jika key mata uang disertakan dan tidak null.
+     * Key yang tidak ada atau bernilai null diizinkan untuk kompatibilitas respons failure Midtrans yang mengomit currency;
+     * nilai selain string 'IDR' (case-insensitive) termasuk string kosong, angka, bool, atau array ditolak.
+     */
+    public function isOptionalIdrCurrencyValid(array $payload, string $key = 'currency'): bool
+    {
+        if (!array_key_exists($key, $payload) || $payload[$key] === null) {
+            return true;
+        }
+
+        return is_string($payload[$key]) && strtoupper($payload[$key]) === 'IDR';
+    }
+
     /**
      * Memvalidasi bahwa response Get Status API dari Midtrans lengkap, valid,
      * dan membuktikan pembayaran berhasil secara definitif.
@@ -1053,8 +1888,12 @@ class MidtransPaymentService
         if (empty($remoteStatus['order_id']) || $remoteStatus['order_id'] !== $donation->order_id) {
             return false;
         }
-        // 2. Validasi gross_amount: wajib ada dan cocok eksak dengan nominal database (tanpa fallback!)
-        if (empty($remoteStatus['gross_amount']) || !$this->isExactAmountMatch($remoteStatus['gross_amount'], (int) $donation->nominal)) {
+        // 2. Validasi gross_amount: wajib ada, strictly whole-IDR, dan cocok eksak dengan nominal database (tanpa fallback!)
+        if (!$this->isExactAmountMatch($remoteStatus['gross_amount'] ?? null, $donation->nominal)) {
+            return false;
+        }
+
+        if (!$this->isOptionalIdrCurrencyValid($remoteStatus)) {
             return false;
         }
 
@@ -1078,6 +1917,7 @@ class MidtransPaymentService
 
     /**
      * Validasi response provider untuk status gagal yang definitif.
+     * Catatan kompatibilitas D0.1: currency opsional (absent/null diizinkan), tetapi nilai non-null selain 'IDR' ditolak.
      */
     public function validateProviderFailure(array $remoteStatus, Donation $donation): bool
     {
@@ -1085,8 +1925,11 @@ class MidtransPaymentService
             return false;
         }
 
-        if (empty($remoteStatus['gross_amount']) ||
-            !$this->isExactAmountMatch($remoteStatus['gross_amount'], (int) $donation->nominal)) {
+        if (!$this->isExactAmountMatch($remoteStatus['gross_amount'] ?? null, $donation->nominal)) {
+            return false;
+        }
+
+        if (!$this->isOptionalIdrCurrencyValid($remoteStatus)) {
             return false;
         }
 
@@ -1111,8 +1954,7 @@ class MidtransPaymentService
         if (empty($remoteStatus['order_id']) || $remoteStatus['order_id'] !== $donation->order_id) {
             return false;
         }
-        if (empty($remoteStatus['gross_amount']) ||
-            !$this->isExactAmountMatch($remoteStatus['gross_amount'], (int) $donation->nominal)) {
+        if (!$this->isExactAmountMatch($remoteStatus['gross_amount'] ?? null, $donation->nominal)) {
             return false;
         }
 
@@ -1121,26 +1963,69 @@ class MidtransPaymentService
     }
 
     /**
-     * Membandingkan nilai gross_amount dari provider dengan nominal integer di database
-     * secara eksak tanpa pembulatan float, dan menolak pecahan non-nol.
+     * Memvalidasi dan menormalisasi nominal whole-IDR positif secara ketat (ASCII-only, tanpa koersi float/bool/whitespace).
+     * Mengembalikan string digit kanonik (mis. '10000') atau null jika tidak valid.
      */
-    public function isExactAmountMatch(string|int|float $grossAmount, int $dbNominal): bool
+    public function normalizeStrictWholeIdrAmount(mixed $value): ?string
     {
-        $amountStr = trim((string) $grossAmount);
-        if (!is_numeric($amountStr)) {
+        if (is_int($value)) {
+            if ($value <= 0) {
+                return null;
+            }
+
+            $digits = (string) $value;
+            return strlen($digits) <= self::MAX_WHOLE_IDR_DIGITS ? $digits : null;
+        }
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        if (preg_match('/\A([1-9][0-9]{0,12})(?:\.0{1,2})?\z/', $value, $matches) !== 1) {
+            return null;
+        }
+
+        return $matches[1];
+    }
+
+    /**
+     * Mengonversi nilai nominal whole-IDR tervalidasi ke integer hanya jika berada dalam rentang aman PHP_INT_MAX.
+     */
+    public function parseStrictWholeIdrInt(mixed $value): ?int
+    {
+        $normalized = $this->normalizeStrictWholeIdrAmount($value);
+        if ($normalized === null) {
+            return null;
+        }
+
+        $maxIntStr = (string) PHP_INT_MAX;
+        if (
+            strlen($normalized) > strlen($maxIntStr)
+            || (strlen($normalized) === strlen($maxIntStr) && strcmp($normalized, $maxIntStr) > 0)
+        ) {
+            return null;
+        }
+
+        return (int) $normalized;
+    }
+
+    /**
+     * Membandingkan nilai gross_amount dari provider dengan nominal database secara eksak
+     * menggunakan string desimal kanonik whole-IDR tanpa pembulatan float atau truncating cast.
+     */
+    public function isExactAmountMatch(mixed $grossAmount, mixed $dbNominal): bool
+    {
+        $normalizedProvider = $this->normalizeStrictWholeIdrAmount($grossAmount);
+        if ($normalizedProvider === null) {
             return false;
         }
 
-        if (str_contains($amountStr, '.')) {
-            [$intPart, $decPart] = explode('.', $amountStr, 2);
-            // Jika ada pecahan selain .0 atau .00, tolak
-            if ($decPart !== '00' && $decPart !== '0' && $decPart !== '') {
-                return false;
-            }
-            return (int) $intPart === $dbNominal;
+        $normalizedLocal = $this->normalizeStrictWholeIdrAmount($dbNominal);
+        if ($normalizedLocal === null) {
+            return false;
         }
 
-        return (int) $amountStr === $dbNominal;
+        return $normalizedProvider === $normalizedLocal;
     }
 
     /**
@@ -1176,7 +2061,7 @@ class MidtransPaymentService
         Donation $donation,
         string $transactionStatus,
         ?string $fraudStatus = null,
-        ?string $grossAmount = null,
+        mixed $grossAmount = null,
         ?CampaignProgressService $progressService = null,
         bool $isPreVerifiedRecovery = false
     ): array {
@@ -1199,20 +2084,23 @@ class MidtransPaymentService
                 return ['status' => 'not_found', 'donation_status' => 'unknown', 'message' => 'Record not found'];
             }
 
-            // 2. Validasi exact nominal jika grossAmount disertakan
-            if ($grossAmount !== null) {
-                if (!$this->isExactAmountMatch($grossAmount, (int) $locked->nominal)) {
-                    Log::error('Midtrans status transition: nominal tidak cocok', [
-                        'order_id' => $locked->order_id,
-                        'db_nominal' => $locked->nominal,
-                        'gross_amount' => $grossAmount,
-                    ]);
-                    return [
-                        'status' => 'amount_mismatch',
-                        'donation_status' => $locked->status,
-                        'message' => 'Nominal provider tidak cocok dengan database.',
-                    ];
-                }
+            // 2. Validasi exact nominal: wajib untuk seluruh transisi pembayaran terverifikasi/gagal/pending,
+            //    recovery settlement, atau kapan pun grossAmount disediakan.
+            $requiresVerifiedAmount = $grossAmount !== null
+                || $isPreVerifiedRecovery
+                || in_array($transactionStatus, ['settlement', 'capture', 'pending', 'expire', 'deny', 'cancel'], true);
+
+            if ($requiresVerifiedAmount && !$this->isExactAmountMatch($grossAmount, $locked->nominal)) {
+                Log::error('Midtrans status transition: nominal tidak cocok', [
+                    'order_id' => $locked->order_id,
+                    'db_nominal' => $locked->nominal,
+                    'gross_amount' => is_scalar($grossAmount) ? $grossAmount : gettype($grossAmount),
+                ]);
+                return [
+                    'status' => 'amount_mismatch',
+                    'donation_status' => $locked->status,
+                    'message' => 'Nominal provider tidak cocok dengan database.',
+                ];
             }
 
             // 3. Status Terverifikasi adalah Final
@@ -1349,7 +2237,7 @@ class MidtransPaymentService
         }
 
         // HTTP request ke Status API di luar database transaction (NO LOCK HELD)
-        $midtransStatus = $this->checkTransactionStatus($donation->order_id);
+        $midtransStatus = $this->checkTransactionStatus($donation->order_id, $donation->id ? (int) $donation->id : null);
         $transactionStatus = $midtransStatus['transaction_status'] ?? null;
         $fraudStatus = $midtransStatus['fraud_status'] ?? null;
 
@@ -1364,11 +2252,15 @@ class MidtransPaymentService
         // Untuk settlement / capture accept, WAJIB validasi provider data secara lengkap
         // (order_id, gross_amount, status_code, fraud_status). Tanpa gross_amount -> DITOLAK!
         if ($transactionStatus === 'settlement' || ($transactionStatus === 'capture' && $fraudStatus === 'accept')) {
-            if (!empty($midtransStatus['gross_amount']) && !$this->isExactAmountMatch($midtransStatus['gross_amount'], (int) $donation->nominal)) {
+            if (
+                array_key_exists('gross_amount', $midtransStatus)
+                && $midtransStatus['gross_amount'] !== null
+                && !$this->isExactAmountMatch($midtransStatus['gross_amount'], $donation->nominal)
+            ) {
                 Log::error('Midtrans reconciliation: nominal tidak cocok', [
                     'order_id' => $donation->order_id,
                     'db_nominal' => $donation->nominal,
-                    'provider_amount' => $midtransStatus['gross_amount'],
+                    'provider_amount' => is_scalar($midtransStatus['gross_amount']) ? $midtransStatus['gross_amount'] : gettype($midtransStatus['gross_amount']),
                 ]);
                 return ['reconciled' => false, 'status' => $donation->status, 'detail' => 'amount_mismatch'];
             }
@@ -1384,6 +2276,12 @@ class MidtransPaymentService
 
         if (in_array($transactionStatus, ['expire', 'deny', 'cancel'], true)) {
             if (!$this->validateProviderFailure($midtransStatus, $donation)) {
+                return ['reconciled' => false, 'status' => $donation->status, 'detail' => 'incomplete_or_mismatched_provider_data'];
+            }
+        }
+
+        if ($transactionStatus === 'pending') {
+            if (!$this->validateProviderPending($midtransStatus, $donation)) {
                 return ['reconciled' => false, 'status' => $donation->status, 'detail' => 'incomplete_or_mismatched_provider_data'];
             }
         }

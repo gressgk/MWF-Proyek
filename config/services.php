@@ -58,6 +58,11 @@ return [
         // Batas nominal sementara (menunggu ketentuan resmi dari PM / Pengaturan Admin WeCare)
         'min_amount' => (int) env('MIDTRANS_MIN_AMOUNT', 1000),
         'max_amount' => (int) env('MIDTRANS_MAX_AMOUNT', 100000000),
+        'observability' => [
+            'enabled' => filter_var(env('MIDTRANS_OBSERVABILITY_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+            'channel' => env('MIDTRANS_OBSERVABILITY_LOG_CHANNEL', 'midtrans_observability'),
+            'allowed_environments' => ['local', 'testing'],
+        ],
     ],
 
 ];

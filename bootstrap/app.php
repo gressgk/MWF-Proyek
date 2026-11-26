@@ -25,6 +25,16 @@ return Application::configure(basePath: dirname(__DIR__))
             'midtrans/webhook',
             'midtrans/webhook/subscription',
         ]);
+
+        // Pertahankan representasi mentah payload webhook Midtrans (whitespace/empty string)
+        // agar validasi nominal eksak dan signature SHA512 tidak termodifikasi secara diam-diam.
+        $isMidtransWebhook = static fn (Request $request): bool => $request->is(
+            'midtrans/webhook',
+            'midtrans/webhook/subscription'
+        );
+
+        $middleware->trimStrings(except: [$isMidtransWebhook]);
+        $middleware->convertEmptyStringsToNull(except: [$isMidtransWebhook]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

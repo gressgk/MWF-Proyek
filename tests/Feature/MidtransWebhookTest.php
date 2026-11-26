@@ -1265,3 +1265,331 @@ test('timeout during out-of-order recovery check leaves status gagal without cor
     $donation->refresh();
     expect($donation->status)->toBe('gagal');
 });
+
+// ============================================================
+// 31. E5.1.8C: STRICT AMOUNT, MIDDLEWARE, SIGNATURE & RECONCILIATION HARDENING
+// ============================================================
+
+test('e5.1.8c regular webhook: accepts valid signed settlement amount formats', function (mixed $grossAmount) {
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-E518C-FMT-' . Str::random(6),
+        'nominal'  => 50000,
+    ]]);
+    $campaign = Campaign::find($donation->campaign_id);
+    $secret = config('services.midtrans.signature_secret_key');
+
+    $payload = [
+        'order_id'           => $donation->order_id,
+        'status_code'        => '200',
+        'gross_amount'       => $grossAmount,
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => makeWebhookSignature($donation->order_id, '200', (string) $grossAmount, $secret),
+    ];
+
+    $this->postJson(route('midtrans.webhook'), $payload)
+        ->assertStatus(200)
+        ->assertJson(['message' => 'OK']);
+
+    expect($donation->fresh()->status)->toBe('terverifikasi');
+    expect((int) $campaign->fresh()->terkumpul_nominal)->toBe(50000);
+})->with([
+    'two decimals string' => ['50000.00'],
+    'single zero decimal string' => ['50000.0'],
+    'whole integer string' => ['50000'],
+    'integer' => [50000],
+]);
+
+test('e5.1.8c regular webhook: rejects signature generated for different gross_amount representation with 403', function () {
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-E518C-SIGREP-001',
+        'nominal'  => 50000,
+    ]]);
+    $secret = config('services.midtrans.signature_secret_key');
+
+    // Signature dihitung dari '50000.00', tetapi payload mengirim '50000'
+    $payload = [
+        'order_id'           => $donation->order_id,
+        'status_code'        => '200',
+        'gross_amount'       => '50000',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => makeWebhookSignature($donation->order_id, '200', '50000.00', $secret),
+    ];
+
+    $this->postJson(route('midtrans.webhook'), $payload)
+        ->assertStatus(403)
+        ->assertJson(['message' => 'Invalid signature']);
+
+    expect($donation->fresh()->status)->toBe('menunggu_pembayaran');
+});
+
+test('e5.1.8c regular webhook: rejects scientific notation even with valid synthetic signature', function () {
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-E518C-SCI-001',
+        'nominal'  => 50000,
+    ]]);
+    $campaign = Campaign::find($donation->campaign_id);
+    $secret = config('services.midtrans.signature_secret_key');
+
+    $payload = [
+        'order_id'           => $donation->order_id,
+        'status_code'        => '200',
+        'gross_amount'       => '5e4',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => makeWebhookSignature($donation->order_id, '200', '5e4', $secret),
+    ];
+
+    $this->postJson(route('midtrans.webhook'), $payload)
+        ->assertStatus(422)
+        ->assertJson(['message' => 'Amount mismatch']);
+
+    expect($donation->fresh()->status)->toBe('menunggu_pembayaran');
+    expect((int) $campaign->fresh()->terkumpul_nominal)->toBe(0);
+});
+
+test('e5.1.8c regular webhook: preserves raw whitespace and rejects raw JSON float or scientific numbers', function () {
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-E518C-RAW-001',
+        'nominal'  => 50000,
+    ]]);
+    $campaign = Campaign::find($donation->campaign_id);
+    $secret = config('services.midtrans.signature_secret_key');
+
+    // 1. Whitespace tidak di-trim oleh TrimStrings di route webhook -> tetap ditolak 422
+    $wsAmount = ' 50000.00 ';
+    $wsSig = makeWebhookSignature($donation->order_id, '200', $wsAmount, $secret);
+    $rawWsJson = json_encode([
+        'order_id'           => $donation->order_id,
+        'status_code'        => '200',
+        'gross_amount'       => $wsAmount,
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => $wsSig,
+    ]);
+    $this->call(
+        'POST',
+        route('midtrans.webhook'),
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'],
+        $rawWsJson
+    )->assertStatus(422)->assertJson(['message' => 'Amount mismatch']);
+
+    // 2. Raw JSON integral float 50000.0 -> ditolak 400 (tidak jadi int 50000)
+    $rawFloatJson = sprintf(
+        '{"order_id":"%s","status_code":"200","gross_amount":50000.0,"transaction_status":"settlement","fraud_status":"accept","signature_key":"%s"}',
+        $donation->order_id,
+        makeWebhookSignature($donation->order_id, '200', '50000.0', $secret)
+    );
+    $this->call(
+        'POST',
+        route('midtrans.webhook'),
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'],
+        $rawFloatJson
+    )->assertStatus(400)->assertJson(['message' => 'Invalid payload']);
+
+    // 3. Raw JSON scientific float 5e4 -> ditolak 400
+    $rawSciJson = sprintf(
+        '{"order_id":"%s","status_code":"200","gross_amount":5e4,"transaction_status":"settlement","fraud_status":"accept","signature_key":"%s"}',
+        $donation->order_id,
+        makeWebhookSignature($donation->order_id, '200', '5e4', $secret)
+    );
+    $this->call(
+        'POST',
+        route('midtrans.webhook'),
+        [],
+        [],
+        [],
+        ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'],
+        $rawSciJson
+    )->assertStatus(400)->assertJson(['message' => 'Invalid payload']);
+
+    expect($donation->fresh()->status)->toBe('menunggu_pembayaran');
+    expect((int) $campaign->fresh()->terkumpul_nominal)->toBe(0);
+});
+
+test('e5.1.8c regular webhook: rejects fractional DB nominal even when provider sends matching integer amount', function () {
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-E518C-FRACDB-001',
+        'nominal'  => 50000,
+    ]]);
+    DB::table('donations')->where('id', $donation->id)->update(['nominal' => '50000.99']);
+    $donation->refresh();
+    $campaign = Campaign::find($donation->campaign_id);
+    $secret = config('services.midtrans.signature_secret_key');
+
+    $payload = [
+        'order_id'           => $donation->order_id,
+        'status_code'        => '200',
+        'gross_amount'       => '50000.00',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => makeWebhookSignature($donation->order_id, '200', '50000.00', $secret),
+    ];
+
+    $this->postJson(route('midtrans.webhook'), $payload)
+        ->assertStatus(422)
+        ->assertJson(['message' => 'Amount mismatch']);
+
+    expect($donation->fresh()->status)->toBe('menunggu_pembayaran');
+    expect((int) $campaign->fresh()->terkumpul_nominal)->toBe(0);
+});
+
+test('e5.1.8c regular webhook: rejects malformed amount and signature types safely with 400', function (array $overrides) {
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-E518C-MALTYPE-' . Str::random(5),
+        'nominal'  => 50000,
+    ]]);
+    $secret = config('services.midtrans.signature_secret_key');
+
+    $payload = array_merge([
+        'order_id'           => $donation->order_id,
+        'status_code'        => '200',
+        'gross_amount'       => '50000.00',
+        'transaction_status' => 'settlement',
+        'fraud_status'       => 'accept',
+        'signature_key'      => makeWebhookSignature($donation->order_id, '200', '50000.00', $secret),
+    ], $overrides);
+
+    $this->postJson(route('midtrans.webhook'), $payload)
+        ->assertStatus(400)
+        ->assertJson(['message' => 'Invalid payload']);
+
+    expect($donation->fresh()->status)->toBe('menunggu_pembayaran');
+})->with([
+    'array gross_amount' => [['gross_amount' => ['50000.00']]],
+    'bool gross_amount' => [['gross_amount' => true]],
+    'empty gross_amount' => [['gross_amount' => '']],
+    'array signature_key' => [['signature_key' => ['sig']]],
+    'int signature_key' => [['signature_key' => 12345]],
+    'bool signature_key' => [['signature_key' => true]],
+    'whitespace signature_key' => [['signature_key' => '   ']],
+]);
+
+test('e5.1.8c regular reconciliation: rejects invalid provider amounts, fractional or null DB nominal, and null transition amount', function () {
+    $service = app(\App\Services\MidtransPaymentService::class);
+
+    // 1. Invalid provider amount formats on settlement -> rejected without mutation
+    foreach (['5e4', ' 50000.00 ', '50000.', '0050000', ['50000.00']] as $badProviderAmount) {
+        $donation = createPendingDonation(['donation' => [
+            'order_id' => 'DON-RECON-BAD-' . Str::random(6),
+            'nominal'  => 50000,
+        ]]);
+        Http::fake([
+            'https://api.sandbox.midtrans.com/v2/' . $donation->order_id . '/status' => Http::response([
+                'order_id'           => $donation->order_id,
+                'status_code'        => '200',
+                'transaction_status' => 'settlement',
+                'fraud_status'       => 'accept',
+                'gross_amount'       => $badProviderAmount,
+            ], 200),
+        ]);
+
+        $res = $service->reconcileDonation($donation);
+        expect($res['reconciled'])->toBeFalse();
+        expect($res['detail'])->toBe('amount_mismatch');
+        expect($donation->fresh()->status)->toBe('menunggu_pembayaran');
+    }
+
+    // 2. Fractional DB nominal rejected during reconciliation
+    $fracDonation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-RECON-FRAC-001',
+        'nominal'  => 50000,
+    ]]);
+    DB::table('donations')->where('id', $fracDonation->id)->update(['nominal' => '50000.75']);
+    $fracDonation->refresh();
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/DON-RECON-FRAC-001/status' => Http::response([
+            'order_id'           => 'DON-RECON-FRAC-001',
+            'status_code'        => '200',
+            'transaction_status' => 'settlement',
+            'fraud_status'       => 'accept',
+            'gross_amount'       => '50000.00',
+        ], 200),
+    ]);
+    $fracRes = $service->reconcileDonation($fracDonation);
+    expect($fracRes['reconciled'])->toBeFalse();
+    expect($fracRes['detail'])->toBe('amount_mismatch');
+    expect($fracDonation->fresh()->status)->toBe('menunggu_pembayaran');
+
+    // 3. Null DB nominal rejected during reconciliation
+    $nullDonation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-RECON-NULL-001',
+        'nominal'  => null,
+    ]]);
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/DON-RECON-NULL-001/status' => Http::response([
+            'order_id'           => 'DON-RECON-NULL-001',
+            'status_code'        => '200',
+            'transaction_status' => 'settlement',
+            'fraud_status'       => 'accept',
+            'gross_amount'       => '50000.00',
+        ], 200),
+    ]);
+    $nullRes = $service->reconcileDonation($nullDonation);
+    expect($nullRes['reconciled'])->toBeFalse();
+    expect($nullRes['detail'])->toBe('amount_mismatch');
+    expect($nullDonation->fresh()->status)->toBe('menunggu_pembayaran');
+
+    // 4. Invalid failure and pending provider amounts rejected
+    $failDonation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-RECON-FAILBAD-001',
+        'nominal'  => 50000,
+    ]]);
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/DON-RECON-FAILBAD-001/status' => Http::response([
+            'order_id'           => 'DON-RECON-FAILBAD-001',
+            'status_code'        => '407',
+            'transaction_status' => 'expire',
+            'gross_amount'       => '5e4',
+        ], 200),
+    ]);
+    $failRes = $service->reconcileDonation($failDonation);
+    expect($failRes['reconciled'])->toBeFalse();
+    expect($failRes['detail'])->toBe('incomplete_or_mismatched_provider_data');
+    expect($failDonation->fresh()->status)->toBe('menunggu_pembayaran');
+
+    // 5. Direct processTransactionTransition() cannot bypass verification by passing null grossAmount
+    $directDonation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-DIRECT-NULL-001',
+        'nominal'  => 50000,
+    ]]);
+    $directRes = $service->processTransactionTransition($directDonation, 'settlement', 'accept', null);
+    expect($directRes['status'])->toBe('amount_mismatch');
+    expect($directDonation->fresh()->status)->toBe('menunggu_pembayaran');
+});
+
+test('D0: reconcileDonation failure rejects non-IDR and malformed currency without marking donation gagal', function (mixed $badCurrency) {
+    $service = app(\App\Services\MidtransPaymentService::class);
+    $donation = createPendingDonation(['donation' => [
+        'order_id' => 'DON-D0-RECON-CURR-' . Str::random(6),
+        'nominal' => 50000,
+    ]]);
+
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/' . $donation->order_id . '/status' => Http::response([
+            'order_id' => $donation->order_id,
+            'status_code' => '407',
+            'transaction_status' => 'expire',
+            'gross_amount' => '50000.00',
+            'currency' => $badCurrency,
+        ], 200),
+    ]);
+
+    $res = $service->reconcileDonation($donation);
+    expect($res['reconciled'])->toBeFalse();
+    expect($res['detail'])->toBe('incomplete_or_mismatched_provider_data');
+    expect($donation->fresh()->status)->toBe('menunggu_pembayaran');
+})->with([
+    'USD' => ['USD'],
+    'empty string' => [''],
+    'false bool' => [false],
+    'zero int' => [0],
+    'array' => [['IDR']],
+]);

@@ -60,6 +60,28 @@ a:hover { color: var(--wc-red); }
     font-weight: 600;
 }
 .wc-btn-outline:hover { background-color: var(--wc-orange); color: #fff; }
+.wc-btn-outline:disabled,
+.wc-btn-primary:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+}
+
+.wc-btn-danger-outline {
+    background-color: transparent;
+    border: 1.5px solid var(--wc-red);
+    color: var(--wc-red);
+    border-radius: 999px;
+    padding: .5rem 1.3rem;
+    font-weight: 600;
+}
+.wc-btn-danger-outline:hover { background-color: var(--wc-red); color: #fff; }
+.wc-btn-danger-outline:disabled { opacity: .6; cursor: not-allowed; }
+.wc-btn-danger-outline.btn-sm,
+.wc-btn-outline.btn-sm,
+.wc-btn-primary.btn-sm {
+    padding: .3rem .95rem;
+    font-size: .85rem;
+}
 
 .wc-card {
     background-color: var(--wc-card);
@@ -83,6 +105,11 @@ a:hover { color: var(--wc-red); }
 .wc-badge-mendesak { background-color: #FBE0D8; color: var(--wc-red); }
 .wc-badge-biasa { background-color: #FDEFD9; color: var(--wc-orange-dark); }
 .wc-badge-terjadwal { background-color: #E4EEE3; color: var(--wc-green); }
+.wc-badge-paused { background-color: #F3ECE2; color: var(--wc-brown); }
+.wc-badge-cancelled { background-color: #FBE0D8; color: var(--wc-red); }
+.wc-badge-neutral { background-color: #EFEAE4; color: var(--wc-brown-dark); }
+.wc-notice-warning { color: #8a5300; font-weight: 500; }
+.wc-sub-item:last-child { border-bottom: 0 !important; padding-bottom: 0 !important; margin-bottom: 0 !important; }
 
 .wc-progress {
     height: 10px;
@@ -184,6 +211,7 @@ a:hover { color: var(--wc-red); }
 
     --bs-body-bg: var(--wc-cream);
     --bs-body-color: var(--wc-brown-dark);
+    --bs-secondary-color: #d6cfc7;
     --bs-border-color: var(--wc-border);
     --bs-secondary-bg: var(--wc-cream-soft);
     --bs-tertiary-bg: var(--wc-card);
@@ -206,6 +234,14 @@ a:hover { color: var(--wc-red); }
     color: var(--wc-brown-dark) !important;
 }
 
+[data-bs-theme="dark"] .text-secondary {
+    color: #d6cfc7 !important;
+}
+
+[data-bs-theme="dark"] .wc-notice-warning {
+    color: #f6c96b;
+}
+
 [data-bs-theme="dark"] .bg-white,
 [data-bs-theme="dark"] .bg-light {
     background-color: var(--wc-card) !important;
@@ -221,6 +257,18 @@ a:hover { color: var(--wc-red); }
 
 [data-bs-theme="dark"] .wc-badge-terjadwal {
     background-color: #304338;
+}
+[data-bs-theme="dark"] .wc-badge-paused {
+    background-color: #3D3831;
+    color: var(--wc-brown);
+}
+[data-bs-theme="dark"] .wc-badge-cancelled {
+    background-color: #49352f;
+    color: var(--wc-red);
+}
+[data-bs-theme="dark"] .wc-badge-neutral {
+    background-color: #3C414A;
+    color: var(--wc-brown-dark);
 }
 
 [data-bs-theme="dark"] .form-control,

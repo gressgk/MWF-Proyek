@@ -290,21 +290,100 @@
                                                         tokenField.value = res.token_id;
                                                         submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Memproses otorisasi awal kartu...';
 
-                                                        // Kirim form via fetch JSON untuk menangani potensi challenge 3DS
+                                                        // Kirim form via fetch JSON untuk menangani potensi challenge 3DS & validasi ketat respons (F52.5)
                                                         const formData = new FormData(form);
+                                                        const postController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                                                        const postTimer = postController
+                                                            ? window.setTimeout(function () {
+                                                                  postController.abort();
+                                                              }, 25000)
+                                                            : null;
+
                                                         fetch(form.action, {
                                                             method: 'POST',
                                                             body: formData,
+                                                            credentials: 'same-origin',
+                                                            signal: postController ? postController.signal : undefined,
                                                             headers: {
                                                                 'Accept': 'application/json',
                                                                 'X-Requested-With': 'XMLHttpRequest'
                                                             }
                                                         })
                                                         .then(async response => {
-                                                            const data = await response.json().catch(() => ({}));
-                                                            if (!response.ok) {
-                                                                throw new Error(data.message || 'Terjadi kesalahan saat memproses donasi.');
+                                                            if (postTimer !== null) {
+                                                                window.clearTimeout(postTimer);
                                                             }
+
+                                                            if (response.redirected || response.status === 401 || response.status === 419) {
+                                                                const sessionErr = new Error('Sesi Anda telah berakhir atau token keamanan kedaluwarsa. Jangan kirim ulang pembayaran sebelum memeriksa Riwayat Donasi.');
+                                                                sessionErr.ambiguous = true;
+                                                                throw sessionErr;
+                                                            }
+
+                                                            const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+                                                            if (contentType.indexOf('application/json') === -1) {
+                                                                const formatErr = new Error('Respons server tidak berformat JSON yang valid.');
+                                                                formatErr.ambiguous = true;
+                                                                throw formatErr;
+                                                            }
+
+                                                            let data = null;
+                                                            try {
+                                                                data = await response.json();
+                                                            } catch (jsonErr) {
+                                                                const parseErr = new Error('Respons JSON dari server rusak atau tidak lengkap.');
+                                                                parseErr.ambiguous = true;
+                                                                throw parseErr;
+                                                            }
+
+                                                            if (!data || typeof data !== 'object') {
+                                                                const emptyErr = new Error('Struktur respons server tidak valid.');
+                                                                emptyErr.ambiguous = true;
+                                                                throw emptyErr;
+                                                            }
+
+                                                            if (!response.ok) {
+                                                                const err = new Error(
+                                                                    typeof data.message === 'string' && data.message.trim() !== ''
+                                                                        ? data.message
+                                                                        : 'Terjadi kesalahan saat memproses donasi.'
+                                                                );
+                                                                err.ambiguous = Boolean(data.ambiguous)
+                                                                    || response.status >= 500
+                                                                    || response.status === 408
+                                                                    || response.status === 429;
+                                                                throw err;
+                                                            }
+
+                                                            if (data.success !== true) {
+                                                                const notSuccessErr = new Error(
+                                                                    typeof data.message === 'string' && data.message.trim() !== ''
+                                                                        ? data.message
+                                                                        : 'Aktivasi langganan belum dikonfirmasi berhasil oleh server.'
+                                                                );
+                                                                notSuccessErr.ambiguous = Boolean(data.ambiguous !== false);
+                                                                throw notSuccessErr;
+                                                            }
+
+                                                            if (data.requires_3ds === true) {
+                                                                const validRedirect = typeof data.redirect_url === 'string' && /^https?:\/\//i.test(data.redirect_url.trim());
+                                                                const validOrderId = typeof data.order_id === 'string' && data.order_id.trim() !== '';
+                                                                if (!validRedirect || !validOrderId) {
+                                                                    const bad3dsErr = new Error('Data otorisasi 3DS dari server tidak lengkap.');
+                                                                    bad3dsErr.ambiguous = true;
+                                                                    throw bad3dsErr;
+                                                                }
+                                                                return data;
+                                                            }
+
+                                                            const hasSubId = typeof data.subscription_id === 'string' && data.subscription_id.trim() !== '';
+                                                            const hasStatus = typeof data.status === 'string' && data.status.trim() !== '';
+                                                            if (!hasSubId || !hasStatus) {
+                                                                const missingFieldsErr = new Error('Respons aktivasi langganan tidak memuat identitas langganan yang lengkap.');
+                                                                missingFieldsErr.ambiguous = true;
+                                                                throw missingFieldsErr;
+                                                            }
+
                                                             return data;
                                                         })
                                                         .then(data => {
@@ -331,13 +410,28 @@
                                                                     window.location.href = data.redirect_url;
                                                                 }
                                                             } else {
-                                                                // Aktivasi sukses tanpa 3DS
+                                                                // Aktivasi tervalidasi eksplisit tanpa 3DS
                                                                 window.location.href = "{{ route('donatur.riwayat') }}?status=subscription_created";
                                                             }
                                                         })
                                                         .catch(err => {
-                                                            resetSubmitLoading();
-                                                            showTokenError(err.message);
+                                                            if (postTimer !== null) {
+                                                                window.clearTimeout(postTimer);
+                                                            }
+                                                            const isAbort = err && err.name === 'AbortError';
+                                                            const isAmbiguousOutcome = isAbort || Boolean(err && err.ambiguous) || !(err && 'ambiguous' in err);
+                                                            if (isAmbiguousOutcome) {
+                                                                // E5.2 4.3 / F52.5: cegah kirim ulang otomatis saat outcome server/jaringan belum pasti.
+                                                                submitBtn.disabled = true;
+                                                                submitBtn.textContent = 'Periksa Riwayat Sebelum Mengulang';
+                                                                const msg = isAbort
+                                                                    ? 'Permintaan ke server melewati batas waktu.'
+                                                                    : (err && err.message ? err.message : 'Status permintaan belum dapat dipastikan.');
+                                                                showTokenError(msg + ' Silakan periksa halaman Riwayat Donasi atau Settings Donasi Rutin terlebih dahulu.');
+                                                            } else {
+                                                                resetSubmitLoading();
+                                                                showTokenError(err.message);
+                                                            }
                                                         });
                                                     },
                                                     onFailure: function (res) {

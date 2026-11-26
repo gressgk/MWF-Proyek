@@ -3,7 +3,8 @@
 namespace App\Http\Controllers\Donatur;
 
 use App\Http\Controllers\Controller;
-use App\Models\Donation;
+use App\Models\Subscription;
+use App\Services\SubscriptionScheduleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -12,16 +13,45 @@ use RuntimeException;
 
 class SettingsController extends Controller
 {
-    public function index()
+    public function index(SubscriptionScheduleService $scheduleService)
     {
         $user = getAuthUser();
 
-        $donasiRutin = Donation::where('user_id', $user->id)
-            ->where('is_recurring', true)
-            ->with('Campaign')
+        $subscriptions = Subscription::where('user_id', $user->id)
+            ->with(['campaign:id,judul,slug'])
+            ->orderByDesc('id')
             ->get();
 
-        return view('donatur.settings', compact('user', 'donasiRutin'));
+        $subscriptionItems = $subscriptions->map(function (Subscription $subscription) use ($scheduleService): array {
+            $scheduleData = $scheduleService->serializeForApi($subscription);
+            $nominal = (int) $subscription->nominal;
+            $frequency = strtolower((string) $subscription->frequency);
+
+            return [
+                'id' => $subscription->id,
+                'campaign_title' => $subscription->campaign?->judul ?? 'Campaign tidak tersedia',
+                'campaign_slug' => $subscription->campaign?->slug,
+                'nominal' => $nominal,
+                'nominal_formatted' => 'Rp' . number_format($nominal, 0, ',', '.'),
+                'frequency' => $subscription->frequency,
+                'frequency_label' => $frequency === 'mingguan' ? 'Mingguan' : 'Bulanan',
+                'status' => $subscription->status,
+                'management_state' => $subscription->management_state,
+                'operation_in_progress' => $subscription->isOperationInProgress(),
+                'next_execution_at' => $scheduleData['next_execution_at'],
+                'schedule' => $scheduleData['schedule'],
+                'endpoints' => [
+                    'pause' => route('donatur.subscriptions.pause', ['subscription' => $subscription->id]),
+                    'resume' => route('donatur.subscriptions.resume', ['subscription' => $subscription->id]),
+                    'cancel' => route('donatur.subscriptions.cancel', ['subscription' => $subscription->id]),
+                    'reconcile' => route('donatur.subscriptions.reconcile', ['subscription' => $subscription->id]),
+                ],
+            ];
+        })->values()->all();
+
+        $subscriptionsIndexUrl = route('donatur.subscriptions.index');
+
+        return view('donatur.settings', compact('user', 'subscriptionItems', 'subscriptionsIndexUrl'));
     }
 
     // Update profil

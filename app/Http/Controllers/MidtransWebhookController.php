@@ -41,10 +41,17 @@ class MidtransWebhookController extends Controller
         $fraudStatus       = $payload['fraud_status'] ?? null;
         $signatureKey      = $payload['signature_key'] ?? null;
 
-        // 2. Validasi kelengkapan field wajib
-        if (!$orderId || !$statusCode || !$grossAmount || !$transactionStatus || !$signatureKey) {
-            Log::warning('Midtrans webhook: payload tidak lengkap', [
-                'order_id' => $orderId,
+        // 2. Validasi kelengkapan dan tipe field wajib sebelum konkatenasi SHA512 / hash_equals
+        $validOrderId = is_string($orderId) && $orderId !== '';
+        $validStatusCode = (is_string($statusCode) && $statusCode !== '') || is_int($statusCode);
+        $validGrossAmount = (is_string($grossAmount) && $grossAmount !== '') || is_int($grossAmount);
+        $validTxStatus = is_string($transactionStatus) && $transactionStatus !== '';
+        $validFraudStatus = $fraudStatus === null || is_string($fraudStatus);
+        $validSignatureKey = is_string($signatureKey) && trim($signatureKey) !== '';
+
+        if (!$validOrderId || !$validStatusCode || !$validGrossAmount || !$validTxStatus || !$validFraudStatus || !$validSignatureKey) {
+            Log::warning('Midtrans webhook: payload tidak lengkap atau tipe field tidak valid', [
+                'order_id' => is_string($orderId) ? $orderId : null,
             ]);
 
             return response()->json(['message' => 'Invalid payload'], 400);
@@ -60,7 +67,7 @@ class MidtransWebhookController extends Controller
             return response()->json(['message' => 'Service unavailable'], 503);
         }
 
-        $expectedSignature = hash('sha512', $orderId . $statusCode . $grossAmount . $signingSecret);
+        $expectedSignature = hash('sha512', $orderId . (string) $statusCode . (string) $grossAmount . $signingSecret);
         if (!hash_equals($expectedSignature, $signatureKey)) {
             Log::warning('Midtrans webhook: signature tidak valid', [
                 'order_id' => $orderId,
@@ -94,8 +101,8 @@ class MidtransWebhookController extends Controller
             return response()->json(['message' => 'Order not found'], 200);
         }
 
-        // 6. Validasi eksak gross_amount (tanpa pembulatan float, tolak desimal tak nol)
-        if (!$midtransService->isExactAmountMatch($grossAmount, (int) $donation->nominal)) {
+        // 6. Validasi eksak gross_amount (tanpa pembulatan float, tolak desimal tak nol dan format ambigu)
+        if (!$midtransService->isExactAmountMatch($grossAmount, $donation->nominal)) {
             Log::error('Midtrans webhook: nominal tidak cocok — potensi manipulasi', [
                 'order_id'        => $orderId,
                 'db_nominal'      => $donation->nominal,
@@ -134,10 +141,14 @@ class MidtransWebhookController extends Controller
             $donation,
             $transactionStatus,
             $fraudStatus,
-            (string) $grossAmount,
+            $grossAmount,
             $progressService,
             $isPreVerifiedRecovery
         );
+
+        if (($result['status'] ?? null) === 'amount_mismatch') {
+            return response()->json(['message' => 'Amount mismatch'], 422);
+        }
 
         // 9. E4 Sandbox Preflight: Jika donasi ini merupakan pembayaran awal donasi rutin (INIT-SUB-...) yang berhasil terverifikasi
         // dan belum memiliki subscription_id, selesaikan pembuatan Subscription API secara aman & terverifikasi provider!
@@ -161,9 +172,8 @@ class MidtransWebhookController extends Controller
                 if ((!empty($remoteOrderId) && $remoteOrderId !== $donation->order_id) ||
                     $remoteCode !== '200' ||
                     !$isRemoteSuccess ||
-                    empty($remoteAmount) ||
-                    !$midtransService->isExactAmountMatch($remoteAmount, (int) $donation->nominal) ||
-                    (!empty($remoteCurrency) && strtoupper($remoteCurrency) !== 'IDR') ||
+                    !$midtransService->isExactAmountMatch($remoteAmount, $donation->nominal) ||
+                    !$midtransService->isOptionalIdrCurrencyValid($remoteStatus) ||
                     empty($providerSavedToken)
                 ) {
                     Log::warning('Midtrans webhook: Verifikasi provider untuk initial charge gagal atau data tidak valid', [
@@ -181,8 +191,8 @@ class MidtransWebhookController extends Controller
                     return response()->json(['message' => 'Forged saved_token_id detected'], 403);
                 }
 
-                // Aktifkan subscription menggunakan token resmi yang diverifikasi dari provider
-                $midtransService->activateSubscriptionFromInitialCharge($donation, $providerSavedToken);
+                // Aktifkan subscription menggunakan token resmi dan nominal terverifikasi dari provider (D0.2)
+                $midtransService->activateSubscriptionFromInitialCharge($donation, $providerSavedToken, $remoteAmount);
             } catch (\Throwable $e) {
                 Log::error('Midtrans webhook: Gagal menghubungi Status API provider saat verifikasi initial charge', [
                     'order_id' => $donation->order_id,

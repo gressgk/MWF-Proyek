@@ -138,24 +138,12 @@ class DonasiUangController extends Controller
                         return $this->respondError($request, 'Kunci transaksi tidak valid untuk akun Anda.', 422, 'idempotency_key');
                     }
                     if ((int) $existingSub->campaign_id !== (int) $campaign->id ||
-                        (int) $existingSub->nominal !== (int) $validated['nominal'] ||
+                        !$midtransService->isExactAmountMatch($validated['nominal'], $existingSub->nominal) ||
                         $existingSub->frequency !== $frequency) {
                         return $this->respondError($request, 'Kunci transaksi telah digunakan dengan parameter langganan yang berbeda.', 422, 'idempotency_key');
                     }
 
-                    if ($request->expectsJson()) {
-                        return response()->json([
-                            'success'           => true,
-                            'subscription_id'   => $existingSub->subscription_id,
-                            'status'            => $existingSub->status,
-                            'frequency'         => $existingSub->frequency,
-                            'nominal'           => (int) $existingSub->nominal,
-                            'next_execution_at' => $existingSub->next_execution_at,
-                            'message'           => 'Langganan donasi rutin yang sama ditemukan (idempotent).',
-                        ], 200);
-                    }
-
-                    return redirect()->route('donatur.riwayat')->with('info', 'Langganan donasi rutin Anda sudah aktif.');
+                    return $this->buildIdempotentSubscriptionResponse($request, $existingSub);
                 }
             }
 
@@ -181,21 +169,34 @@ class DonasiUangController extends Controller
             } catch (QueryException $e) {
                 if ($e->getCode() == 23000 && $idempotencyKey) {
                     $existingInit = Donation::where('idempotency_key', "init_{$idempotencyKey}")->first();
-                    if ($existingInit && $existingInit->subscription_id) {
-                        $sub = Subscription::where('subscription_id', $existingInit->subscription_id)->first();
-                        if ($sub) {
-                            if ($request->expectsJson()) {
-                                return response()->json([
-                                    'success'           => true,
-                                    'subscription_id'   => $sub->subscription_id,
-                                    'status'            => $sub->status,
-                                    'frequency'         => $sub->frequency,
-                                    'nominal'           => (int) $sub->nominal,
-                                    'next_execution_at' => $sub->next_execution_at,
-                                    'message'           => 'Langganan donasi rutin yang sama ditemukan (idempotent).',
-                                ], 200);
+                    if ($existingInit) {
+                        if ((int) $existingInit->user_id !== (int) $user->id) {
+                            return $this->respondError($request, 'Kunci transaksi tidak valid untuk akun Anda.', 422, 'idempotency_key');
+                        }
+                        if (
+                            (int) $existingInit->campaign_id !== (int) $campaign->id
+                            || !$midtransService->isExactAmountMatch($validated['nominal'], $existingInit->nominal)
+                            || $existingInit->frequency !== $frequency
+                        ) {
+                            return $this->respondError($request, 'Kunci transaksi telah digunakan dengan parameter langganan yang berbeda.', 422, 'idempotency_key');
+                        }
+
+                        if (!empty($existingInit->subscription_id)) {
+                            $sub = Subscription::where('subscription_id', $existingInit->subscription_id)->first();
+                            if ($sub) {
+                                if ((int) $sub->user_id !== (int) $user->id) {
+                                    return $this->respondError($request, 'Kunci transaksi tidak valid untuk akun Anda.', 422, 'idempotency_key');
+                                }
+                                if (
+                                    (int) $sub->campaign_id !== (int) $campaign->id
+                                    || !$midtransService->isExactAmountMatch($validated['nominal'], $sub->nominal)
+                                    || $sub->frequency !== $frequency
+                                ) {
+                                    return $this->respondError($request, 'Kunci transaksi telah digunakan dengan parameter langganan yang berbeda.', 422, 'idempotency_key');
+                                }
+
+                                return $this->buildIdempotentSubscriptionResponse($request, $sub);
                             }
-                            return redirect()->route('donatur.riwayat')->with('info', 'Langganan donasi rutin Anda sudah aktif.');
                         }
                     }
                 }
@@ -211,10 +212,16 @@ class DonasiUangController extends Controller
                     $campaign
                 );
 
-                $txStatus     = $chargeResult['transaction_status'] ?? null;
-                $redirectUrl  = $chargeResult['redirect_url'] ?? null;
-                $fraudStatus  = $chargeResult['fraud_status'] ?? null; // E4.3.1: Jangan pernah default ke 'accept'!
-                $savedTokenId = $chargeResult['saved_token_id'] ?? null;
+                $txStatus          = $chargeResult['transaction_status'] ?? null;
+                $redirectUrl       = $chargeResult['redirect_url'] ?? null;
+                $fraudStatus       = $chargeResult['fraud_status'] ?? null; // E4.3.1: Jangan pernah default ke 'accept'!
+                $savedTokenId      = $chargeResult['saved_token_id'] ?? null;
+                $hasInitialAmount  = array_key_exists('gross_amount', $chargeResult);
+                $initialChargeAmt  = $hasInitialAmount ? $chargeResult['gross_amount'] : null;
+                $chargeGrossAmount = $initialChargeAmt;
+                $chargeOrderId     = $chargeResult['order_id'] ?? null;
+                $chargeStatusCode  = (string) ($chargeResult['status_code'] ?? '');
+                $chargeCurrency    = $chargeResult['currency'] ?? null;
 
                 // 3. Jika memerlukan otorisasi 3DS di browser
                 if (!empty($redirectUrl) || ($txStatus === 'pending' && !empty($redirectUrl))) {
@@ -235,38 +242,191 @@ class DonasiUangController extends Controller
                     return redirect()->away($redirectUrl);
                 }
 
-                // 4. Jika charge awal ditolak oleh penyedia
+                // 4. Jika charge awal ditolak oleh penyedia: wajib bukti order, mata uang, & nominal terverifikasi (C3, D0.1)
                 if (in_array($txStatus, ['deny', 'cancel', 'expire'], true) || $fraudStatus === 'deny') {
-                    $initialDonation->update([
-                        'status'                => 'gagal',
-                        'payment_status_detail' => 'charge_denied',
-                    ]);
+                    $orderMatches = $chargeOrderId === null
+                        || (is_string($chargeOrderId) && $chargeOrderId === $initialDonation->order_id);
+                    $effectiveStatusForCode = is_string($txStatus) ? $txStatus : '';
+                    $codeConsistent = $chargeStatusCode !== ''
+                        && $midtransService->isStatusCodeConsistent($chargeStatusCode, $effectiveStatusForCode);
+                    $currencyValid = $midtransService->isOptionalIdrCurrencyValid($chargeResult);
+
+                    $transitionedToFailed = $this->applyVerifiedInitialChargeFailure(
+                        $initialDonation,
+                        $orderMatches && $codeConsistent && $currencyValid,
+                        $chargeGrossAmount,
+                        $txStatus,
+                        $fraudStatus,
+                        $midtransService
+                    );
 
                     return $this->respondError(
                         $request,
-                        'Otorisasi kartu pembayaran awal ditolak oleh bank atau sistem pembayaran.',
+                        $transitionedToFailed
+                            ? 'Otorisasi kartu pembayaran awal ditolak oleh bank atau sistem pembayaran.'
+                            : 'Respons penolakan otorisasi kartu tidak lengkap atau nominal tidak sesuai.',
                         422,
                         'midtrans'
                     );
                 }
 
-                // 5. E4.3.1: Perketat validasi initial charge - jika capture tanpa fraud_status atau status belum definitif, rekonsiliasi aktif
+                // 5. E4.3.1 + E5.1.8C.1 (C1): Jika capture tanpa fraud_status, Status API dievaluasi sebagai sumber independen
+                $reconciledViaStatusApi = false;
                 if ($txStatus === 'capture' && empty($fraudStatus)) {
                     try {
                         $remote = $midtransService->checkTransactionStatus($initialDonation->order_id);
-                        $txStatus     = $remote['transaction_status'] ?? null;
-                        $fraudStatus  = $remote['fraud_status'] ?? null;
-                        $savedTokenId = $savedTokenId ?: ($remote['saved_token_id'] ?? null);
+                    } catch (MidtransConnectionException $e) {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_reconciliation_timeout');
+                        throw $e;
                     } catch (\Throwable $e) {
-                        // Jangan default accept jika rekonsiliasi gagal
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_reconciliation_unavailable');
+                        return $this->respondError(
+                            $request,
+                            'Status otorisasi kartu tidak dapat diverifikasi dari penyedia saat ini.',
+                            503,
+                            'midtrans'
+                        );
+                    }
+
+                    $remoteOrderId     = $remote['order_id'] ?? null;
+                    $remoteTxStatus    = $remote['transaction_status'] ?? null;
+                    $remoteFraudStatus = $remote['fraud_status'] ?? null;
+                    $remoteStatusCode  = (string) ($remote['status_code'] ?? '');
+                    $remoteAmount      = $remote['gross_amount'] ?? null;
+                    $remoteCurrency    = $remote['currency'] ?? null;
+                    $remoteSavedToken  = $remote['saved_token_id'] ?? null;
+
+                    if (!is_string($remoteOrderId) || $remoteOrderId !== $initialDonation->order_id) {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_reconciliation_mismatch');
+                        return $this->respondError(
+                            $request,
+                            'Identitas transaksi otorisasi kartu tidak cocok dengan data tagihan.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    if (in_array($remoteTxStatus, ['deny', 'cancel', 'expire'], true) || $remoteFraudStatus === 'deny') {
+                        $effectiveRemoteStatus = is_string($remoteTxStatus) ? $remoteTxStatus : '';
+                        $remoteCodeValid = $remoteStatusCode !== ''
+                            && $midtransService->isStatusCodeConsistent($remoteStatusCode, $effectiveRemoteStatus);
+                        $remoteCurrencyValid = $midtransService->isOptionalIdrCurrencyValid($remote);
+
+                        $transitionedToFailed = $this->applyVerifiedInitialChargeFailure(
+                            $initialDonation,
+                            $remoteCodeValid && $remoteCurrencyValid,
+                            $remoteAmount,
+                            $remoteTxStatus,
+                            $remoteFraudStatus,
+                            $midtransService
+                        );
+
+                        return $this->respondError(
+                            $request,
+                            $transitionedToFailed
+                                ? 'Otorisasi kartu pembayaran awal ditolak oleh bank atau sistem pembayaran.'
+                                : 'Status penolakan otorisasi kartu tidak dapat diverifikasi.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    $remoteCurrencyValid = $midtransService->isOptionalIdrCurrencyValid($remote);
+                    $remoteSuccess = ($remoteTxStatus === 'settlement')
+                        || ($remoteTxStatus === 'capture' && $remoteFraudStatus === 'accept');
+
+                    if (!$remoteSuccess || $remoteStatusCode !== '200' || !$remoteCurrencyValid) {
+                        $this->markUnverifiedInitialDetail(
+                            $initialDonation,
+                            'charge_' . (is_string($remoteTxStatus) && $remoteTxStatus !== '' ? $remoteTxStatus : 'unknown')
+                        );
+                        return $this->respondError(
+                            $request,
+                            'Status otorisasi kartu belum selesai atau membutuhkan konfirmasi lanjutan.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    if (!$midtransService->isExactAmountMatch($remoteAmount, $initialDonation->nominal)) {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_amount_mismatch');
+                        return $this->respondError(
+                            $request,
+                            'Nominal otorisasi kartu tidak sesuai dengan data tagihan.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    if ($hasInitialAmount && !$midtransService->isExactAmountMatch($initialChargeAmt, $remoteAmount)) {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_reconciliation_amount_conflict');
+                        return $this->respondError(
+                            $request,
+                            'Nominal pada respons awal dan verifikasi status transaksi tidak konsisten.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    if (
+                        !empty($savedTokenId)
+                        && !empty($remoteSavedToken)
+                        && (!is_string($remoteSavedToken) || !hash_equals((string) $savedTokenId, $remoteSavedToken))
+                    ) {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_token_mismatch');
+                        return $this->respondError(
+                            $request,
+                            'Token pembayaran otorisasi kartu tidak konsisten dengan penyedia.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    $txStatus = $remoteTxStatus;
+                    $fraudStatus = $remoteFraudStatus;
+                    $chargeGrossAmount = $remoteAmount;
+                    $chargeOrderId = $remoteOrderId;
+                    $chargeStatusCode = $remoteStatusCode;
+                    $chargeCurrency = $remoteCurrency;
+                    $savedTokenId = !empty($remoteSavedToken) ? $remoteSavedToken : $savedTokenId;
+                    $reconciledViaStatusApi = true;
+                }
+
+                if (!$reconciledViaStatusApi) {
+                    if ($chargeOrderId !== null && (!is_string($chargeOrderId) || $chargeOrderId !== $initialDonation->order_id)) {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_order_mismatch');
+                        return $this->respondError(
+                            $request,
+                            'Identitas transaksi otorisasi kartu tidak sesuai dengan data tagihan.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    if (!$midtransService->isOptionalIdrCurrencyValid($chargeResult)) {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_currency_mismatch');
+                        return $this->respondError(
+                            $request,
+                            'Mata uang otorisasi kartu bukan IDR.',
+                            422,
+                            'midtrans'
+                        );
+                    }
+
+                    if ($chargeStatusCode !== '' && $chargeStatusCode !== '200') {
+                        $this->markUnverifiedInitialDetail($initialDonation, 'charge_status_code_mismatch');
+                        return $this->respondError(
+                            $request,
+                            'Status otorisasi kartu belum berhasil diverifikasi.',
+                            422,
+                            'midtrans'
+                        );
                     }
                 }
 
                 $isChargeSuccess = ($txStatus === 'settlement') || ($txStatus === 'capture' && $fraudStatus === 'accept');
                 if (!$isChargeSuccess) {
-                    $initialDonation->update([
-                        'payment_status_detail' => 'charge_' . ($txStatus ?: 'unknown'),
-                    ]);
+                    $this->markUnverifiedInitialDetail($initialDonation, 'charge_' . ($txStatus ?: 'unknown'));
 
                     return $this->respondError(
                         $request,
@@ -276,11 +436,20 @@ class DonasiUangController extends Controller
                     );
                 }
 
+                if (!$midtransService->isExactAmountMatch($chargeGrossAmount, $initialDonation->nominal)) {
+                    $this->markUnverifiedInitialDetail($initialDonation, 'charge_amount_mismatch');
+
+                    return $this->respondError(
+                        $request,
+                        'Nominal otorisasi kartu tidak sesuai dengan data tagihan.',
+                        422,
+                        'midtrans'
+                    );
+                }
+
                 // Fail-closed jika saved_token_id tidak dikembalikan
                 if (empty($savedTokenId)) {
-                    $initialDonation->update([
-                        'payment_status_detail' => 'missing_saved_token',
-                    ]);
+                    $this->markUnverifiedInitialDetail($initialDonation, 'missing_saved_token');
 
                     return $this->respondError(
                         $request,
@@ -290,33 +459,77 @@ class DonasiUangController extends Controller
                     );
                 }
 
-                // Tandai donasi awal terverifikasi & perbarui progress campaign
-                $initialDonation->update([
-                    'status'                     => 'terverifikasi',
-                    'payment_status_detail'      => 'settled',
-                    'webhook_processed_at'       => now(),
-                    'webhook_transaction_status' => $txStatus,
-                    'webhook_fraud_status'       => $fraudStatus,
-                    'tanggal_diterima'           => now(),
-                ]);
-                app(\App\Services\CampaignProgressService::class)->recalculate($campaign);
+                // C4: Kunci record Donation sebelum menandai terverifikasi dan menghitung ulang progress campaign
+                $verifiedLocked = DB::transaction(function () use (
+                    $initialDonation,
+                    $chargeGrossAmount,
+                    $txStatus,
+                    $fraudStatus,
+                    $midtransService
+                ): bool {
+                    $locked = Donation::where('id', $initialDonation->id)->lockForUpdate()->first();
+                    if (
+                        !$locked
+                        || $locked->status === 'gagal'
+                        || !$midtransService->isExactAmountMatch($chargeGrossAmount, $locked->nominal)
+                    ) {
+                        return false;
+                    }
 
-                // 6. Eksekusi alur aktivasi Subscription terpusat dan aman (E4.3.1)
-                $activation = $midtransService->activateSubscriptionFromInitialCharge($initialDonation, $savedTokenId);
+                    if ($locked->status !== 'terverifikasi') {
+                        $locked->update([
+                            'status'                     => 'terverifikasi',
+                            'payment_status_detail'      => 'settled',
+                            'webhook_processed_at'       => now(),
+                            'webhook_transaction_status' => $txStatus,
+                            'webhook_fraud_status'       => $fraudStatus,
+                            'tanggal_diterima'           => now(),
+                        ]);
+                        $campaign = Campaign::find($locked->campaign_id);
+                        if ($campaign) {
+                            app(\App\Services\CampaignProgressService::class)->recalculate($campaign);
+                        }
+                    }
+
+                    return true;
+                });
+
+                if (!$verifiedLocked) {
+                    $this->markUnverifiedInitialDetail($initialDonation, 'charge_amount_mismatch');
+                    return $this->respondError(
+                        $request,
+                        'Nominal atau status donasi tidak konsisten saat verifikasi.',
+                        422,
+                        'midtrans'
+                    );
+                }
+
+                $initialDonation->refresh();
+
+                // 6. Eksekusi alur aktivasi Subscription terpusat dan aman (E4.3.1, D0.2, E5.2 4.3)
+                $activation = $midtransService->activateSubscriptionFromInitialCharge($initialDonation, $savedTokenId, $chargeGrossAmount);
                 if (!$activation['success']) {
-                    return $this->respondError($request, $activation['message'], 422, 'midtrans');
+                    return $this->respondError(
+                        $request,
+                        $activation['message'],
+                        422,
+                        'midtrans',
+                        ['ambiguous' => (bool) ($activation['ambiguous'] ?? false)]
+                    );
                 }
 
                 $subscription = $activation['subscription'];
 
                 if ($request->expectsJson()) {
+                    $scheduleData = app(\App\Services\SubscriptionScheduleService::class)->serializeForApi($subscription);
                     return response()->json([
                         'success'           => true,
                         'subscription_id'   => $subscription->subscription_id,
                         'status'            => $subscription->status,
                         'frequency'         => $subscription->frequency,
                         'nominal'           => (int) $subscription->nominal,
-                        'next_execution_at' => $subscription->next_execution_at,
+                        'next_execution_at' => $scheduleData['next_execution_at'],
+                        'schedule'          => $scheduleData['schedule'],
                         'message'           => 'Donasi rutin berhasil diaktifkan melalui Midtrans Subscription API.',
                     ], 201);
                 }
@@ -362,7 +575,7 @@ class DonasiUangController extends Controller
                 // B. Pastikan parameter transaksi (campaign, nominal, is_anonim) cocok dengan key sebelumnya
                 $requestIsAnonim = $request->boolean('is_anonim');
                 if ((int) $existing->campaign_id !== (int) $campaign->id ||
-                    (int) $existing->nominal !== (int) $validated['nominal'] ||
+                    !$midtransService->isExactAmountMatch($validated['nominal'], $existing->nominal) ||
                     (bool) $existing->is_anonim !== $requestIsAnonim) {
                     return $this->respondError(
                         $request,
@@ -529,7 +742,7 @@ class DonasiUangController extends Controller
                 if ($existing && !empty($existing->snap_token)) {
                     $isOwner = (int) $existing->user_id === (int) $user->id;
                     $isCampaignMatch = (int) $existing->campaign_id === (int) $campaign->id;
-                    $isNominalMatch = (int) $existing->nominal === (int) $validated['nominal'];
+                    $isNominalMatch = $midtransService->isExactAmountMatch($validated['nominal'], $existing->nominal);
                     $isAnonimMatch = (bool) $existing->is_anonim === $request->boolean('is_anonim');
                     $isPending = $existing->status === 'menunggu_pembayaran';
 
@@ -681,19 +894,27 @@ class DonasiUangController extends Controller
         $activation = $midtransService->activateSubscriptionFromInitialCharge($donation);
         if (!$activation['success']) {
             $status = ($activation['recoverable'] ?? false) ? 200 : 422;
-            return $this->respondError($request, $activation['message'], $status, 'midtrans');
+            return $this->respondError(
+                $request,
+                $activation['message'],
+                $status,
+                'midtrans',
+                ['ambiguous' => (bool) ($activation['ambiguous'] ?? false)]
+            );
         }
 
         $subscription = $activation['subscription'];
 
         if ($request->expectsJson()) {
+            $scheduleData = app(\App\Services\SubscriptionScheduleService::class)->serializeForApi($subscription);
             return response()->json([
                 'success'           => true,
                 'subscription_id'   => $subscription->subscription_id,
                 'status'            => $subscription->status,
                 'frequency'         => $subscription->frequency,
                 'nominal'           => (int) $subscription->nominal,
-                'next_execution_at' => $subscription->next_execution_at,
+                'next_execution_at' => $scheduleData['next_execution_at'],
+                'schedule'          => $scheduleData['schedule'],
                 'message'           => 'Donasi rutin berhasil diaktifkan.',
             ], 200);
         }
@@ -701,16 +922,94 @@ class DonasiUangController extends Controller
         return redirect()->route('donatur.riwayat')->with('success', 'Donasi rutin berhasil diaktifkan.');
     }
 
+    protected function applyVerifiedInitialChargeFailure(
+        Donation $donation,
+        bool $evidenceValid,
+        mixed $providerAmount,
+        mixed $txStatus,
+        mixed $fraudStatus,
+        MidtransPaymentService $midtransService
+    ): bool {
+        return DB::transaction(function () use (
+            $donation,
+            $evidenceValid,
+            $providerAmount,
+            $txStatus,
+            $fraudStatus,
+            $midtransService
+        ): bool {
+            $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
+            if (!$locked || $locked->status === 'terverifikasi') {
+                return false;
+            }
+
+            if ($evidenceValid && $midtransService->isExactAmountMatch($providerAmount, $locked->nominal)) {
+                $locked->update([
+                    'status'                     => 'gagal',
+                    'payment_status_detail'      => 'charge_denied',
+                    'webhook_processed_at'       => now(),
+                    'webhook_transaction_status' => is_string($txStatus) ? $txStatus : null,
+                    'webhook_fraud_status'       => is_string($fraudStatus) ? $fraudStatus : null,
+                ]);
+
+                return true;
+            }
+
+            $locked->update([
+                'payment_status_detail' => 'charge_failure_unverified',
+            ]);
+
+            return false;
+        });
+    }
+
+    protected function markUnverifiedInitialDetail(Donation $donation, string $detail): void
+    {
+        DB::transaction(function () use ($donation, $detail): void {
+            $locked = Donation::where('id', $donation->id)->lockForUpdate()->first();
+            if ($locked && $locked->status !== 'terverifikasi') {
+                $locked->update(['payment_status_detail' => $detail]);
+            }
+        });
+    }
+
+    protected function buildIdempotentSubscriptionResponse(Request $request, Subscription $sub)
+    {
+        $message = match ($sub->management_state) {
+            'cancelled' => 'Langganan donasi rutin dengan kunci transaksi ini telah dibatalkan.',
+            'paused' => 'Langganan donasi rutin dengan kunci transaksi ini sedang dijeda.',
+            'reconciliation' => 'Langganan donasi rutin dengan kunci transaksi ini sedang menunggu pemeriksaan reconciliation.',
+            default => 'Langganan donasi rutin yang sama ditemukan (idempotent).',
+        };
+
+        if ($request->expectsJson()) {
+            $scheduleData = app(\App\Services\SubscriptionScheduleService::class)->serializeForApi($sub);
+            return response()->json([
+                'success'           => true,
+                'subscription_id'   => $sub->subscription_id,
+                'status'            => $sub->status,
+                'management_state'  => $sub->management_state,
+                'frequency'         => $sub->frequency,
+                'nominal'           => (int) $sub->nominal,
+                'next_execution_at' => $scheduleData['next_execution_at'],
+                'schedule'          => $scheduleData['schedule'],
+                'message'           => $message,
+            ], 200);
+        }
+
+        return redirect()->route('donatur.riwayat')->with('info', $message);
+    }
+
     /**
      * Mengembalikan pesan error yang aman tanpa membocorkan credential atau raw SQL.
      */
-    protected function respondError(Request $request, string $message, int $statusCode = 422, string $errorKey = 'error')
+    protected function respondError(Request $request, string $message, int $statusCode = 422, string $errorKey = 'error', array $extra = [])
     {
         if ($request->expectsJson()) {
-            return response()->json([
+            return response()->json(array_merge([
                 'success' => false,
                 'message' => $message,
-            ], $statusCode);
+            ], $extra), $statusCode);
         }
 
         return back()->withInput()->withErrors([
