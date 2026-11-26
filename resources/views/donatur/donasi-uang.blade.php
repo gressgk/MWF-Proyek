@@ -124,17 +124,59 @@
 
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" name="is_recurring" id="rutin" value="1" data-bs-toggle="collapse" data-bs-target="#frekuensiBox" {{ old('is_recurring') ? 'checked' : '' }}>
-                            <label class="form-check-label" for="rutin">Jadikan donasi rutin <span class="badge bg-light text-muted ms-1">Fase E4</span></label>
+                            <label class="form-check-label fw-semibold" for="rutin">Jadikan donasi rutin <span class="badge bg-primary text-white ms-1">Midtrans Subscription</span></label>
                         </div>
                         <div class="collapse mb-4 {{ old('is_recurring') ? 'show' : '' }}" id="frekuensiBox">
-                            <div class="p-3 bg-light rounded">
-                                <label class="form-label fw-semibold small">Frekuensi donasi rutin</label>
-                                <select name="frequency" class="form-select mb-2">
-                                    <option value="mingguan" {{ old('frequency') == 'mingguan' ? 'selected' : '' }}>Mingguan</option>
-                                    <option value="bulanan" {{ old('frequency') == 'bulanan' ? 'selected' : '' }}>Bulanan</option>
+                            <div class="p-3 bg-light rounded border">
+                                <label class="form-label fw-semibold small">Frekuensi Penagihan Otomatis</label>
+                                <select name="frequency" class="form-select mb-3">
+                                    <option value="mingguan" {{ old('frequency') == 'mingguan' ? 'selected' : '' }}>Mingguan (setiap 1 minggu)</option>
+                                    <option value="bulanan" {{ old('frequency', 'bulanan') == 'bulanan' ? 'selected' : '' }}>Bulanan (setiap 1 bulan)</option>
                                 </select>
+
+                                {{-- Peringatan Metode Pembayaran --}}
+                                <div class="alert alert-secondary py-2 px-3 small mb-3">
+                                    <i class="bi bi-info-circle me-1"></i> Donasi rutin saat ini didukung melalui <strong>Kartu Kredit / Debit</strong> dengan tokenisasi aman Midtrans. Donasi rutin GoPay memerlukan <em>GoPay Account Linking</em> yang belum tersedia.
+                                </div>
+
+                                {{-- Input Kartu Tokenisasi Frontend (DILARANG menggunakan name attribute agar data kartu tidak terkirim ke backend WeCare) --}}
+                                <div class="border rounded p-3 bg-white mb-3" id="cardTokenizationSection">
+                                    <h6 class="fw-semibold small mb-2"><i class="bi bi-shield-lock me-1 text-primary"></i> Data Kartu (Tokenisasi Langsung ke Midtrans)</h6>
+                                    <div class="mb-2">
+                                        <label class="form-label small text-secondary mb-1">Nomor Kartu</label>
+                                        <input type="text" id="card_number_input" class="form-control form-control-sm font-monospace" placeholder="4111 2222 3333 4444" maxlength="19" autocomplete="cc-number">
+                                    </div>
+                                    <div class="row g-2 mb-2">
+                                        <div class="col-4">
+                                            <label class="form-label small text-secondary mb-1">Bulan (MM)</label>
+                                            <input type="text" id="card_exp_month_input" class="form-control form-control-sm text-center" placeholder="MM" maxlength="2">
+                                        </div>
+                                        <div class="col-4">
+                                            <label class="form-label small text-secondary mb-1">Tahun (YY)</label>
+                                            <input type="text" id="card_exp_year_input" class="form-control form-control-sm text-center" placeholder="YY" maxlength="2">
+                                        </div>
+                                        <div class="col-4">
+                                            <label class="form-label small text-secondary mb-1">CVV</label>
+                                            <input type="password" id="card_cvv_input" class="form-control form-control-sm text-center" placeholder="123" maxlength="4" autocomplete="cc-csc">
+                                        </div>
+                                    </div>
+                                    <div id="cardTokenError" class="text-danger small mt-1 d-none"></div>
+                                </div>
+
+                                {{-- Hidden fields untuk payload backend yang aman --}}
+                                <input type="hidden" name="payment_type" value="credit_card">
+                                <input type="hidden" name="payment_token" id="payment_token" value="{{ old('payment_token') }}">
+
+                                <div class="form-check mb-2">
+                                    {{-- Consent tidak boleh default dicentang --}}
+                                    <input class="form-check-input" type="checkbox" name="recurring_consent" id="recurringConsent" value="accepted" {{ old('recurring_consent') === 'accepted' ? 'checked' : '' }}>
+                                    <label class="form-check-label small" for="recurringConsent">
+                                        Saya menyetujui penagihan otomatis berkala sesuai nominal dan frekuensi yang dipilih melalui Midtrans Subscription API.
+                                    </label>
+                                </div>
+
                                 <p class="small text-muted mb-0">
-                                    <i class="bi bi-info-circle me-1"></i> Donasi rutin menggunakan Midtrans Subscription API akan segera aktif pada Fase E4.
+                                    <i class="bi bi-shield-check me-1"></i> Data kartu Anda diproses langsung oleh Midtrans dan tidak pernah disimpan di server WeCare.
                                 </p>
                             </div>
                         </div>
@@ -144,12 +186,43 @@
                         </button>
                     </form>
 
+                    <script id="midtrans-script" type="text/javascript" src="{{ config('services.midtrans.is_production') ? 'https://api.midtrans.com/v2/assets/js/midtrans-new-3ds.min.js' : 'https://api.sandbox.midtrans.com/v2/assets/js/midtrans-new-3ds.min.js' }}"
+                            data-environment="{{ config('services.midtrans.is_production') ? 'production' : 'sandbox' }}"></script>
                     <script>
                         document.addEventListener('DOMContentLoaded', function () {
                             const nominalInput = document.getElementById('nominalInput');
                             const radios = document.querySelectorAll('.nominal-preset-radio');
                             const form = document.getElementById('formDonasiUang');
                             const submitBtn = document.getElementById('submitBtn');
+                            const rutinCheck = document.getElementById('rutin');
+                            const tokenField = document.getElementById('payment_token');
+                            const tokenError = document.getElementById('cardTokenError');
+                            const clientKey = {{ \Illuminate\Support\Js::from(config('services.midtrans.client_key')) }};
+
+                            function resetSubmitLoading() {
+                                submitBtn.disabled = false;
+                                submitBtn.innerHTML = 'Lanjut ke Pembayaran (Midtrans)';
+                            }
+
+                            function showTokenError(message) {
+                                if (tokenError) {
+                                    tokenError.textContent = message;
+                                    tokenError.classList.remove('d-none');
+                                } else {
+                                    alert(message);
+                                }
+                            }
+
+                            // Konfigurasi object library secara langsung agar context MidtransNew3ds tetap utuh.
+                            if (typeof MidtransNew3ds !== 'undefined') {
+                                if (clientKey) {
+                                    MidtransNew3ds.clientKey = clientKey;
+                                }
+                            } else if (typeof Midtrans !== 'undefined') {
+                                if (clientKey) {
+                                    Midtrans.clientKey = clientKey;
+                                }
+                            }
 
                             radios.forEach(radio => {
                                 radio.addEventListener('change', function () {
@@ -163,7 +236,245 @@
                             });
 
                             if (form && submitBtn) {
-                                form.addEventListener('submit', function () {
+                                form.addEventListener('submit', function (e) {
+                                    // Jika donasi rutin dipilih
+                                    if (rutinCheck && rutinCheck.checked) {
+                                        const consent = document.getElementById('recurringConsent');
+                                        if (!consent || !consent.checked) {
+                                            alert('Persetujuan donasi rutin wajib disetujui.');
+                                            e.preventDefault();
+                                            return;
+                                        }
+
+                                        const cardNum = document.getElementById('card_number_input');
+                                        const expM = document.getElementById('card_exp_month_input');
+                                        const expY = document.getElementById('card_exp_year_input');
+                                        const cvv = document.getElementById('card_cvv_input');
+
+                                        // Jika Midtrans JS library tersedia dan nomor kartu diisi, tokenisasi kartu
+                                        if (clientKey && cardNum && cardNum.value) {
+                                            e.preventDefault();
+                                            submitBtn.disabled = true;
+                                            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Tokenisasi kartu Midtrans...';
+
+                                            const cardData = {
+                                                card_number: cardNum.value.replace(/\s+/g, ''),
+                                                card_exp_month: expM ? expM.value : '',
+                                                card_exp_year: expY ? (expY.value.length === 2 ? '20' + expY.value : expY.value) : '',
+                                                card_cvv: cvv ? cvv.value : ''
+                                            };
+
+                                            let tokenCallbackReceived = false;
+                                            let tokenTimedOut = false;
+                                            const tokenTimeout = window.setTimeout(function () {
+                                                if (!tokenCallbackReceived) {
+                                                    tokenTimedOut = true;
+                                                    resetSubmitLoading();
+                                                    showTokenError('Midtrans tidak merespons dalam waktu yang ditentukan. Silakan coba lagi.');
+                                                }
+                                            }, 15000);
+
+                                            try {
+                                                const tokenOptions = {
+                                                    onSuccess: function (res) {
+                                                        tokenCallbackReceived = true;
+                                                        window.clearTimeout(tokenTimeout);
+                                                        if (tokenTimedOut) {
+                                                            return;
+                                                        }
+                                                        if (!res || !res.token_id) {
+                                                            resetSubmitLoading();
+                                                            showTokenError('Midtrans tidak mengembalikan token kartu yang valid.');
+                                                            return;
+                                                        }
+                                                        tokenField.value = res.token_id;
+                                                        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Memproses otorisasi awal kartu...';
+
+                                                        // Kirim form via fetch JSON untuk menangani potensi challenge 3DS & validasi ketat respons (F52.5)
+                                                        const formData = new FormData(form);
+                                                        const postController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                                                        const postTimer = postController
+                                                            ? window.setTimeout(function () {
+                                                                  postController.abort();
+                                                              }, 25000)
+                                                            : null;
+
+                                                        fetch(form.action, {
+                                                            method: 'POST',
+                                                            body: formData,
+                                                            credentials: 'same-origin',
+                                                            signal: postController ? postController.signal : undefined,
+                                                            headers: {
+                                                                'Accept': 'application/json',
+                                                                'X-Requested-With': 'XMLHttpRequest'
+                                                            }
+                                                        })
+                                                        .then(async response => {
+                                                            if (postTimer !== null) {
+                                                                window.clearTimeout(postTimer);
+                                                            }
+
+                                                            if (response.redirected || response.status === 401 || response.status === 419) {
+                                                                const sessionErr = new Error('Sesi Anda telah berakhir atau token keamanan kedaluwarsa. Jangan kirim ulang pembayaran sebelum memeriksa Riwayat Donasi.');
+                                                                sessionErr.ambiguous = true;
+                                                                throw sessionErr;
+                                                            }
+
+                                                            const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+                                                            if (contentType.indexOf('application/json') === -1) {
+                                                                const formatErr = new Error('Respons server tidak berformat JSON yang valid.');
+                                                                formatErr.ambiguous = true;
+                                                                throw formatErr;
+                                                            }
+
+                                                            let data = null;
+                                                            try {
+                                                                data = await response.json();
+                                                            } catch (jsonErr) {
+                                                                const parseErr = new Error('Respons JSON dari server rusak atau tidak lengkap.');
+                                                                parseErr.ambiguous = true;
+                                                                throw parseErr;
+                                                            }
+
+                                                            if (!data || typeof data !== 'object') {
+                                                                const emptyErr = new Error('Struktur respons server tidak valid.');
+                                                                emptyErr.ambiguous = true;
+                                                                throw emptyErr;
+                                                            }
+
+                                                            if (!response.ok) {
+                                                                const err = new Error(
+                                                                    typeof data.message === 'string' && data.message.trim() !== ''
+                                                                        ? data.message
+                                                                        : 'Terjadi kesalahan saat memproses donasi.'
+                                                                );
+                                                                err.ambiguous = Boolean(data.ambiguous)
+                                                                    || response.status >= 500
+                                                                    || response.status === 408
+                                                                    || response.status === 429;
+                                                                throw err;
+                                                            }
+
+                                                            if (data.success !== true) {
+                                                                const notSuccessErr = new Error(
+                                                                    typeof data.message === 'string' && data.message.trim() !== ''
+                                                                        ? data.message
+                                                                        : 'Aktivasi langganan belum dikonfirmasi berhasil oleh server.'
+                                                                );
+                                                                notSuccessErr.ambiguous = Boolean(data.ambiguous !== false);
+                                                                throw notSuccessErr;
+                                                            }
+
+                                                            if (data.requires_3ds === true) {
+                                                                const validRedirect = typeof data.redirect_url === 'string' && /^https?:\/\//i.test(data.redirect_url.trim());
+                                                                const validOrderId = typeof data.order_id === 'string' && data.order_id.trim() !== '';
+                                                                if (!validRedirect || !validOrderId) {
+                                                                    const bad3dsErr = new Error('Data otorisasi 3DS dari server tidak lengkap.');
+                                                                    bad3dsErr.ambiguous = true;
+                                                                    throw bad3dsErr;
+                                                                }
+                                                                return data;
+                                                            }
+
+                                                            const hasSubId = typeof data.subscription_id === 'string' && data.subscription_id.trim() !== '';
+                                                            const hasStatus = typeof data.status === 'string' && data.status.trim() !== '';
+                                                            if (!hasSubId || !hasStatus) {
+                                                                const missingFieldsErr = new Error('Respons aktivasi langganan tidak memuat identitas langganan yang lengkap.');
+                                                                missingFieldsErr.ambiguous = true;
+                                                                throw missingFieldsErr;
+                                                            }
+
+                                                            return data;
+                                                        })
+                                                        .then(data => {
+                                                            // Jika memerlukan 3DS authentication flow resmi
+                                                            if (data.requires_3ds && data.redirect_url) {
+                                                                if (typeof MidtransNew3ds !== 'undefined' && typeof MidtransNew3ds.authenticate === 'function') {
+                                                                    MidtransNew3ds.authenticate(data.redirect_url, {
+                                                                        performAuthentication: function (redirectUrl) {
+                                                                            window.location.href = redirectUrl;
+                                                                        },
+                                                                        onSuccess: function () {
+                                                                            // Jangan gunakan frontend callback sebagai bukti pembayaran; arahkan ke riwayat
+                                                                            window.location.href = "{{ route('donatur.riwayat') }}?status=verifying";
+                                                                        },
+                                                                        onFailure: function () {
+                                                                            resetSubmitLoading();
+                                                                            alert('Otorisasi 3DS ditolak atau dibatalkan.');
+                                                                        },
+                                                                        onPending: function () {
+                                                                            window.location.href = "{{ route('donatur.riwayat') }}?status=waiting_payment";
+                                                                        }
+                                                                    });
+                                                                } else {
+                                                                    window.location.href = data.redirect_url;
+                                                                }
+                                                            } else {
+                                                                // Aktivasi tervalidasi eksplisit tanpa 3DS
+                                                                window.location.href = "{{ route('donatur.riwayat') }}?status=subscription_created";
+                                                            }
+                                                        })
+                                                        .catch(err => {
+                                                            if (postTimer !== null) {
+                                                                window.clearTimeout(postTimer);
+                                                            }
+                                                            const isAbort = err && err.name === 'AbortError';
+                                                            const isAmbiguousOutcome = isAbort || Boolean(err && err.ambiguous) || !(err && 'ambiguous' in err);
+                                                            if (isAmbiguousOutcome) {
+                                                                // E5.2 4.3 / F52.5: cegah kirim ulang otomatis saat outcome server/jaringan belum pasti.
+                                                                submitBtn.disabled = true;
+                                                                submitBtn.textContent = 'Periksa Riwayat Sebelum Mengulang';
+                                                                const msg = isAbort
+                                                                    ? 'Permintaan ke server melewati batas waktu.'
+                                                                    : (err && err.message ? err.message : 'Status permintaan belum dapat dipastikan.');
+                                                                showTokenError(msg + ' Silakan periksa halaman Riwayat Donasi atau Settings Donasi Rutin terlebih dahulu.');
+                                                            } else {
+                                                                resetSubmitLoading();
+                                                                showTokenError(err.message);
+                                                            }
+                                                        });
+                                                    },
+                                                    onFailure: function (res) {
+                                                        tokenCallbackReceived = true;
+                                                        window.clearTimeout(tokenTimeout);
+                                                        if (tokenTimedOut) {
+                                                            return;
+                                                        }
+                                                        resetSubmitLoading();
+                                                        showTokenError(res && res.validation_messages
+                                                            ? res.validation_messages.join(', ')
+                                                            : 'Gagal memproses kartu melalui Midtrans.');
+                                                    }
+                                                };
+
+                                                if (typeof MidtransNew3ds !== 'undefined' && typeof MidtransNew3ds.getCardToken === 'function') {
+                                                    MidtransNew3ds.getCardToken(cardData, tokenOptions);
+                                                } else if (typeof Midtrans !== 'undefined'
+                                                    && typeof Midtrans.card !== 'undefined'
+                                                    && typeof Midtrans.card.getCardToken === 'function'
+                                                ) {
+                                                    Midtrans.card.getCardToken(cardData, tokenOptions);
+                                                } else {
+                                                    window.clearTimeout(tokenTimeout);
+                                                    resetSubmitLoading();
+                                                    showTokenError('Library Midtrans belum siap. Muat ulang halaman lalu coba kembali.');
+                                                }
+                                            } catch (error) {
+                                                window.clearTimeout(tokenTimeout);
+                                                resetSubmitLoading();
+                                                showTokenError('Tokenisasi kartu gagal karena library Midtrans tidak dapat dijalankan.');
+                                            }
+                                            return;
+                                        }
+
+                                        if (!clientKey) {
+                                            e.preventDefault();
+                                            resetSubmitLoading();
+                                            showTokenError('Konfigurasi Midtrans belum tersedia. Silakan hubungi pengelola.');
+                                            return;
+                                        }
+                                    }
+
                                     submitBtn.disabled = true;
                                     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Menghubungkan ke Midtrans...';
                                 });

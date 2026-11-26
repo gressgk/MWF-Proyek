@@ -18,6 +18,7 @@ class Donation extends Model
         'is_recurring',
         'frequency',
         'order_id',
+        'subscription_id',
         'snap_token',
         'snap_redirect_url',
         'payment_status_detail',
@@ -40,6 +41,11 @@ class Donation extends Model
     public function Campaign()
     {
         return $this->belongsTo(Campaign::class);
+    }
+
+    public function Subscription()
+    {
+        return $this->belongsTo(Subscription::class, 'subscription_id', 'subscription_id');
     }
 
     public function Donatur()

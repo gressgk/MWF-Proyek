@@ -18,6 +18,8 @@ beforeEach(function () {
     Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key-12345');
     Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key-12345');
     Config::set('services.midtrans.is_production', false);
+    Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key');
+    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key');
     Config::set('services.midtrans.min_amount', 1000);
 });
 
@@ -97,6 +99,20 @@ test('donasi uang returns 404 for campaign that only accepts goods', function ()
 
     $response = $this->actingAs($donatur)->get(route('donatur.donasi.uang', $campaign->slug));
     $response->assertStatus(404);
+});
+
+test('recurring donation view configures sandbox midtrans new 3ds script safely', function () {
+    $donatur = User::factory()->donatur()->create();
+    $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
+
+    $response = $this->actingAs($donatur)->get(route('donatur.donasi.uang', $campaign->slug));
+
+    $response->assertOk();
+    $response->assertSee('id="midtrans-script"', false);
+    $response->assertSee('type="text/javascript"', false);
+    $response->assertSee('data-environment="sandbox"', false);
+    $response->assertSee('https://api.sandbox.midtrans.com/v2/assets/js/midtrans-new-3ds.min.js', false);
+    $response->assertSee('MidtransNew3ds.getCardToken(cardData, tokenOptions)', false);
 });
 
 test('successful checkout creates pending donation and retrieves snap token', function () {
@@ -190,6 +206,15 @@ test('nominal validation rejects missing, negative, non-integer, or below minimu
 
 test('idempotent checkout prevents duplicate donations on double submit', function () {
     Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => function ($request) {
+            preg_match('/\/v2\/([^\/]+)\/status/', $request->url(), $matches);
+            return Http::response([
+                'order_id' => $matches[1] ?? '',
+                'status_code' => '201',
+                'transaction_status' => 'pending',
+                'gross_amount' => '75000.00',
+            ], 200);
+        },
         'https://app.sandbox.midtrans.com/snap/v1/transactions' => Http::response([
             'token' => 'snap-mock-idempotent-token-111',
             'redirect_url' => 'https://app.sandbox.midtrans.com/snap/v2/vtweb/snap-mock-idempotent-token-111',
@@ -219,20 +244,25 @@ test('idempotent checkout prevents duplicate donations on double submit', functi
     expect(Donation::where('user_id', $donatur->id)->where('campaign_id', $campaign->id)->count())->toBe(1);
 
     // Midtrans API hanya dipanggil 1 kali
-    Http::assertSentCount(1);
+    Http::assertSentCount(2);
 });
 
-test('recurring donation option is rejected with clear E4 notice and not silently made one-time', function () {
+test('recurring donation requires payment_token (E4 is active)', function () {
+    // E4 sudah diimplementasikan: is_recurring sekarang aktif via Midtrans Subscription API.
+    // Request tanpa payment_token harus ditolak dengan error 'payment_token', bukan 'is_recurring'.
     $donatur = User::factory()->donatur()->create();
     $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
 
     $response = $this->actingAs($donatur)->post(route('donatur.donasi.uang', $campaign->slug), [
-        'nominal' => 100000,
-        'is_recurring' => '1',
-        'frequency' => 'bulanan',
+        'nominal'           => 100000,
+        'is_recurring'      => '1',
+        'frequency'         => 'bulanan',
+        'recurring_consent' => 'accepted',
+        // payment_token sengaja tidak dikirim
     ]);
 
-    $response->assertSessionHasErrors(['is_recurring']);
+    // Seharusnya ditolak karena payment_token tidak ada, BUKAN 'is_recurring'
+    $response->assertSessionHasErrors(['payment_token']);
     expect(Donation::count())->toBe(0);
 });
 
@@ -351,6 +381,15 @@ test('browser callback or query parameter cannot alter donation status to terver
 
 test('idempotency reuse with identical payload returns existing snap token without calling midtrans again', function () {
     Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => function ($request) {
+            preg_match('/\/v2\/([^\/]+)\/status/', $request->url(), $matches);
+            return Http::response([
+                'order_id' => $matches[1] ?? '',
+                'status_code' => '201',
+                'transaction_status' => 'pending',
+                'gross_amount' => '75000.00',
+            ], 200);
+        },
         'https://app.sandbox.midtrans.com/snap/v1/transactions' => Http::response([
             'token' => 'snap-idempotent-reuse-abc',
             'redirect_url' => 'https://app.sandbox.midtrans.com/snap/v2/vtweb/snap-idempotent-reuse-abc',
@@ -384,11 +423,20 @@ test('idempotency reuse with identical payload returns existing snap token witho
     expect(Donation::where('idempotency_key', $key)->count())->toBe(1);
 
     // Midtrans hanya dipanggil 1 kali (request pertama saja)
-    Http::assertSentCount(1);
+    Http::assertSentCount(2);
 });
 
 test('idempotency rejects same key with different nominal', function () {
     Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => function ($request) {
+            preg_match('/\/v2\/([^\/]+)\/status/', $request->url(), $matches);
+            return Http::response([
+                'order_id' => $matches[1] ?? '',
+                'status_code' => '201',
+                'transaction_status' => 'pending',
+                'gross_amount' => '50000.00',
+            ], 200);
+        },
         'https://app.sandbox.midtrans.com/snap/v1/transactions' => Http::response([
             'token' => 'snap-first-nominal',
             'redirect_url' => 'https://app.sandbox.midtrans.com/snap/v2/vtweb/snap-first-nominal',
@@ -420,6 +468,15 @@ test('idempotency rejects same key with different nominal', function () {
 
 test('idempotency rejects same key with different is_anonim value', function () {
     Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => function ($request) {
+            preg_match('/\/v2\/([^\/]+)\/status/', $request->url(), $matches);
+            return Http::response([
+                'order_id' => $matches[1] ?? '',
+                'status_code' => '201',
+                'transaction_status' => 'pending',
+                'gross_amount' => '50000.00',
+            ], 200);
+        },
         'https://app.sandbox.midtrans.com/snap/v1/transactions' => Http::response([
             'token' => 'snap-anonim-check',
             'redirect_url' => 'https://app.sandbox.midtrans.com/snap/v2/vtweb/snap-anonim-check',
@@ -523,8 +580,8 @@ test('connection timeout preserves pending donation record without snap token', 
     expect($donation->order_id)->toStartWith('DON-');
 });
 
-test('retry after timeout with existing pending record does not create duplicate donation', function () {
-    // Skenario: request pertama timeout, request kedua memeriksa status (404 not_found) lalu berhasil membuat Snap token
+test('retry after timeout with 404 does not reuse order or create another snap session', function () {
+    // 404 Status API tidak membuktikan bahwa Snap belum pernah dibuat.
     $callCount = 0;
     Http::fake([
         'https://api.sandbox.midtrans.com/v2/*/status' => Http::response([], 404),
@@ -558,12 +615,12 @@ test('retry after timeout with existing pending record does not create duplicate
     expect($pendingDonation->payment_status_detail)->toBe('timeout_awaiting_reconciliation');
     expect($pendingDonation->snap_token)->toBeNull();
 
-    // Request kedua dengan key yang sama: idempotency mendeteksi pending tanpa token, retry Midtrans
+    // Request kedua: 404 dianggap ambigu, tidak boleh membuat Snap lagi untuk order lama
     $r2 = $this->actingAs($donatur)->post(route('donatur.donasi.uang', $campaign->slug), [
         'nominal' => 50000,
         'idempotency_key' => $key,
     ]);
-    $r2->assertStatus(200);
+    $r2->assertSessionHasErrors(['idempotency_key']);
 
     // MASIH hanya 1 Donation (tidak ada duplikat)
     expect(Donation::count())->toBe(1);
@@ -571,9 +628,9 @@ test('retry after timeout with existing pending record does not create duplicate
     $donation = Donation::first();
     // order_id tidak berubah (sama dengan pending asli)
     expect($donation->order_id)->toBe($pendingDonation->order_id);
-    // Snap token sekarang tersedia
-    expect($donation->snap_token)->toBe('snap-retry-success-token');
-    expect($donation->payment_status_detail)->toBe('snap_created');
+    expect($donation->snap_token)->toBeNull();
+    expect($donation->payment_status_detail)->toBe('timeout_awaiting_reconciliation');
+    expect($callCount)->toBe(1);
 });
 
 // --- HTTP 5XX GATEWAY ERRORS ---
@@ -730,6 +787,15 @@ test('sequential simulation of concurrent requests with same idempotency key pro
     // Untuk pengujian concurrency sesungguhnya, diperlukan load testing terpisah (JMeter/k6).
 
     Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => function ($request) {
+            preg_match('/\/v2\/([^\/]+)\/status/', $request->url(), $matches);
+            return Http::response([
+                'order_id' => $matches[1] ?? '',
+                'status_code' => '201',
+                'transaction_status' => 'pending',
+                'gross_amount' => '50000.00',
+            ], 200);
+        },
         'https://app.sandbox.midtrans.com/snap/v1/transactions' => Http::response([
             'token' => 'snap-concurrent-sim',
             'redirect_url' => 'https://app.sandbox.midtrans.com/snap/v2/vtweb/snap-concurrent-sim',
@@ -758,7 +824,7 @@ test('sequential simulation of concurrent requests with same idempotency key pro
     expect(Donation::where('idempotency_key', $key)->count())->toBe(1);
 
     // Midtrans hanya dipanggil 1x
-    Http::assertSentCount(1);
+    Http::assertSentCount(2);
 });
 
 // ============================================================
@@ -849,6 +915,138 @@ test('retry checkout when provider transaction status is already settlement reco
     expect((int) $campaign->terkumpul_nominal)->toBe(50000);
 });
 
+test('retry settlement without complete reconciliation data does not show verified', function () {
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => Http::response([
+            'order_id' => 'DON-INCOMPLETE-SETTLEMENT',
+            'transaction_status' => 'settlement',
+            'fraud_status' => 'accept',
+        ], 200),
+    ]);
+
+    $donatur = User::factory()->donatur()->create();
+    $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
+    $key = Str::uuid()->toString();
+
+    Donation::create([
+        'campaign_id' => $campaign->id,
+        'user_id' => $donatur->id,
+        'jenis' => 'uang',
+        'nominal' => 50000,
+        'order_id' => 'DON-INCOMPLETE-SETTLEMENT',
+        'status' => 'menunggu_pembayaran',
+        'idempotency_key' => $key,
+    ]);
+
+    $response = $this->actingAs($donatur)->post(route('donatur.donasi.uang', $campaign->slug), [
+        'nominal' => 50000,
+        'idempotency_key' => $key,
+    ]);
+
+    $response->assertSessionHasErrors();
+    $donation = Donation::where('idempotency_key', $key)->first();
+    expect($donation->status)->toBe('menunggu_pembayaran');
+    expect($donation->payment_status_detail)->not->toBe('settled');
+});
+
+test('provider failure with mismatched order or amount is not marked gagal', function () {
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => Http::response([
+            'order_id' => 'DON-WRONG-ORDER',
+            'status_code' => '407',
+            'transaction_status' => 'expire',
+            'gross_amount' => '49999.00',
+        ], 200),
+    ]);
+
+    $donatur = User::factory()->donatur()->create();
+    $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
+    $key = Str::uuid()->toString();
+
+    Donation::create([
+        'campaign_id' => $campaign->id,
+        'user_id' => $donatur->id,
+        'jenis' => 'uang',
+        'nominal' => 50000,
+        'order_id' => 'DON-FAILURE-MISMATCH',
+        'status' => 'menunggu_pembayaran',
+        'idempotency_key' => $key,
+    ]);
+
+    $response = $this->actingAs($donatur)->post(route('donatur.donasi.uang', $campaign->slug), [
+        'nominal' => 50000,
+        'idempotency_key' => $key,
+    ]);
+
+    $response->assertSessionHasErrors();
+    expect(Donation::where('idempotency_key', $key)->first()->status)->toBe('menunggu_pembayaran');
+});
+
+test('expired old snap token is not reused', function () {
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => Http::response([
+            'order_id' => 'DON-OLD-TOKEN',
+            'status_code' => '407',
+            'transaction_status' => 'expire',
+            'gross_amount' => '50000.00',
+        ], 200),
+    ]);
+
+    $donatur = User::factory()->donatur()->create();
+    $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
+    $key = Str::uuid()->toString();
+
+    Donation::create([
+        'campaign_id' => $campaign->id,
+        'user_id' => $donatur->id,
+        'jenis' => 'uang',
+        'nominal' => 50000,
+        'order_id' => 'DON-OLD-TOKEN',
+        'status' => 'menunggu_pembayaran',
+        'snap_token' => 'old-expired-token',
+        'idempotency_key' => $key,
+        'payment_status_detail' => 'snap_created',
+    ]);
+
+    $response = $this->actingAs($donatur)->post(route('donatur.donasi.uang', $campaign->slug), [
+        'nominal' => 50000,
+        'idempotency_key' => $key,
+    ]);
+
+    $response->assertSessionHasErrors();
+    $donation = Donation::where('idempotency_key', $key)->first();
+    expect($donation->status)->toBe('gagal');
+});
+
+test('404 status does not reuse old snap token', function () {
+    Http::fake([
+        'https://api.sandbox.midtrans.com/v2/*/status' => Http::response([], 404),
+    ]);
+
+    $donatur = User::factory()->donatur()->create();
+    $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
+    $key = Str::uuid()->toString();
+
+    Donation::create([
+        'campaign_id' => $campaign->id,
+        'user_id' => $donatur->id,
+        'jenis' => 'uang',
+        'nominal' => 50000,
+        'order_id' => 'DON-404-TOKEN',
+        'status' => 'menunggu_pembayaran',
+        'snap_token' => 'old-ambiguous-token',
+        'idempotency_key' => $key,
+    ]);
+
+    $response = $this->actingAs($donatur)->post(route('donatur.donasi.uang', $campaign->slug), [
+        'nominal' => 50000,
+        'idempotency_key' => $key,
+    ]);
+
+    $response->assertSessionHasErrors();
+    expect($response->getContent())->not->toContain('old-ambiguous-token');
+});
+
 test('concurrent query exception collision with mismatched payload rejects returning snap token with 409', function () {
     // Skenario race condition: request B membentur unique constraint pada idempotency_key,
     // tetapi record yang sudah dibuat memiliki payload berbeda (misal beda user atau beda is_anonim).
@@ -882,3 +1080,34 @@ test('concurrent query exception collision with mismatched payload rejects retur
     $response->assertSessionHasErrors(['idempotency_key']);
     expect($response->getContent())->not->toContain('snap-token-donatur1');
 });
+
+test('e5.1.8c checkout outbound snap: rejects invalid, fractional, null, or oversized local nominal before any HTTP call', function (mixed $badNominal) {
+    Http::fake();
+    $donatur = User::factory()->donatur()->create();
+    $campaign = createCampaignTest(['status' => 'aktif', 'tipe_bantuan' => 'uang']);
+
+    $donation = Donation::create([
+        'campaign_id'     => $campaign->id,
+        'user_id'         => $donatur->id,
+        'jenis'           => 'uang',
+        'nominal'         => $badNominal === 'OVERSIZED' ? 10000 : $badNominal,
+        'order_id'        => 'DON-SNAP-BAD-' . Str::random(6),
+        'status'          => 'menunggu_pembayaran',
+        'idempotency_key' => Str::uuid()->toString(),
+    ]);
+    if ($badNominal === 'OVERSIZED') {
+        $donation->nominal = '10000000000000';
+    }
+
+    $service = app(\App\Services\MidtransPaymentService::class);
+
+    expect(fn () => $service->createSnapTransaction($donation, $donatur, $campaign))
+        ->toThrow(\App\Services\MidtransApiException::class);
+
+    Http::assertNothingSent();
+})->with([
+    'fractional nominal' => ['50000.99'],
+    'null nominal' => [null],
+    'zero nominal' => [0],
+    'oversized nominal' => ['OVERSIZED'],
+]);
