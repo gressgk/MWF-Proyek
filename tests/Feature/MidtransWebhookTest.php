@@ -14,13 +14,13 @@ use Illuminate\Support\Str;
 
 function makeWebhookSignature(string $orderId, string $statusCode, string $grossAmount, ?string $signingSecret = null): string
 {
-    $secret = $signingSecret ?? config('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    $secret = $signingSecret ?? config('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_67890');
     return hash('sha512', $orderId . $statusCode . $grossAmount . $secret);
 }
 
 function webhookPayload(array $overrides = []): array
 {
-    $signingSecret = config('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    $signingSecret = config('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_67890');
     $orderId = $overrides['order_id'] ?? 'DON-TEST-WEBHOOK-001';
     $statusCode = $overrides['status_code'] ?? '200';
     $grossAmount = $overrides['gross_amount'] ?? '50000.00';
@@ -78,9 +78,9 @@ beforeEach(function () {
         throw new \RuntimeException("SAFETY VIOLATION: Tests must run on wecare_testing, currently on {$dbName}");
     }
 
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key-12345');
-    Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key-12345');
-    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    Config::set('services.midtrans.server_key', 'TEST_ONLY_SERVER_KEY_12345');
+    Config::set('services.midtrans.client_key', 'TEST_ONLY_CLIENT_KEY_12345');
+    Config::set('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_67890');
     Config::set('services.midtrans.is_production', false);
 
     Http::preventStrayRequests();
@@ -866,9 +866,9 @@ test('reconcileDonation does not alter already final donation status', function 
 });
 
 test('reconciliation get status api uses server key for basic authentication', function () {
-    $expectedServerKey = 'SB-Mid-server-test-key-12345';
+    $expectedServerKey = 'TEST_ONLY_SERVER_KEY_12345';
     Config::set('services.midtrans.server_key', $expectedServerKey);
-    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    Config::set('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_67890');
 
     Http::fake([
         'https://api.sandbox.midtrans.com/v2/DON-AUTH-CHECK/status' => Http::response([

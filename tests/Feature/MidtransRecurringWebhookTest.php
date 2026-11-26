@@ -21,9 +21,9 @@ beforeEach(function () {
         throw new \RuntimeException("SAFETY VIOLATION: Tests must run on wecare_testing, currently on {$dbName}");
     }
 
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key-12345');
-    Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key-12345');
-    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    Config::set('services.midtrans.server_key', 'TEST_ONLY_SERVER_KEY_12345');
+    Config::set('services.midtrans.client_key', 'TEST_ONLY_CLIENT_KEY_12345');
+    Config::set('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_67890');
     Config::set('services.midtrans.is_production', false);
     Config::set('services.midtrans.status_api_url', 'https://api.sandbox.midtrans.com/v2');
     Config::set('services.midtrans.subscription_api_url', 'https://api.sandbox.midtrans.com/v1/subscriptions');
@@ -38,7 +38,7 @@ beforeEach(function () {
 
 function makeRecurringSignature(string $orderId, string $statusCode, string $grossAmount, ?string $signingSecret = null): string
 {
-    $secret = $signingSecret ?? config('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    $secret = $signingSecret ?? config('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_67890');
     return hash('sha512', $orderId . $statusCode . $grossAmount . $secret);
 }
 
@@ -2655,7 +2655,7 @@ test('e5.1.8b.1 b2: fails closed with 422 and sanitized warning for ambiguous pa
                     && !array_key_exists('signature_key', $context)
                     && !array_key_exists('token', $context)
                     && !str_contains((string) $serialized, 'secret-saved-token-must-not-log')
-                    && !str_contains((string) $serialized, 'SB-Mid-signing-secret');
+                    && !str_contains((string) $serialized, 'TEST_ONLY_SIGNATURE_KEY');
             });
     } finally {
         Carbon::setTestNow();

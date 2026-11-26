@@ -15,11 +15,9 @@ beforeEach(function () {
     }
 
     // Default Midtrans sandbox test credentials
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key-12345');
-    Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key-12345');
+    Config::set('services.midtrans.server_key', 'TEST_ONLY_SERVER_KEY_12345');
+    Config::set('services.midtrans.client_key', 'TEST_ONLY_CLIENT_KEY_12345');
     Config::set('services.midtrans.is_production', false);
-    Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key');
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key');
     Config::set('services.midtrans.min_amount', 1000);
 });
 
@@ -288,7 +286,7 @@ test('midtrans provider definitive failure preserves donation record with gagal 
     $errorMsg = session('errors')->first('midtrans');
     expect($errorMsg)->not->toContain('401');
     expect($errorMsg)->not->toContain('Access denied');
-    expect($errorMsg)->not->toContain('SB-Mid-server');
+    expect($errorMsg)->not->toContain('TEST_ONLY_SERVER_KEY');
     expect($errorMsg)->not->toContain('server_key');
 
     // Record TETAP ADA sebagai audit trail (bukan 0, ini yang membedakan dengan kegagalan config)
@@ -329,7 +327,7 @@ test('missing midtrans server key returns safe public error without exposing cre
     // Pesan publik harus ada dan bermakna (bukan string kosong)
     expect($errorMsg)->not->toBeEmpty();
     // Pesan tidak boleh mengandung detail internal/credential
-    expect($errorMsg)->not->toContain('SB-Mid-server');
+    expect($errorMsg)->not->toContain('TEST_ONLY_SERVER_KEY');
     expect($errorMsg)->not->toContain('server_key');
     expect($errorMsg)->not->toContain('belum dikonfigurasi'); // internal message dari service
     expect($errorMsg)->not->toContain('MidtransConfiguration');
@@ -719,8 +717,8 @@ test('error logs do not contain server key or user personal data', function () {
     $newLog = substr($logAfter, strlen($logBefore));
 
     // Credential tidak boleh muncul di log
-    expect($newLog)->not->toContain('SB-Mid-server-test-key-12345');
-    expect($newLog)->not->toContain('SB-Mid-client-test-key-12345');
+    expect($newLog)->not->toContain('TEST_ONLY_SERVER_KEY_12345');
+    expect($newLog)->not->toContain('TEST_ONLY_CLIENT_KEY_12345');
 
     // Email dan nama user tidak boleh bocor ke log error Midtrans
     // (email diizinkan ada di request log Laravel tapi TIDAK di baris log Midtrans)
@@ -729,7 +727,7 @@ test('error logs do not contain server key or user personal data', function () {
     if (!empty($newLog)) {
         $logLines = array_filter(explode("\n", $newLog), fn($l) => str_contains($l, 'Midtrans'));
         foreach ($logLines as $line) {
-            expect($line)->not->toContain('SB-Mid-server');
+            expect($line)->not->toContain('TEST_ONLY_SERVER_KEY');
         }
     }
 });

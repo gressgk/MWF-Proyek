@@ -14,7 +14,7 @@ beforeEach(function () {
     if ($dbName !== 'wecare_testing') {
         throw new \RuntimeException("SAFETY VIOLATION: Tests must run on wecare_testing, currently on {$dbName}");
     }
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key');
+    Config::set('services.midtrans.server_key', 'TEST_ONLY_SERVER_KEY');
     Config::set('services.midtrans.subscription_api_url', 'https://api.sandbox.midtrans.com/v1/subscriptions');
     Http::preventStrayRequests();
 });
