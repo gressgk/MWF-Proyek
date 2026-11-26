@@ -23,9 +23,9 @@ beforeEach(function () {
         throw new \RuntimeException("SAFETY VIOLATION: Tests must run on wecare_testing, current DB: {$effectiveDb}");
     }
 
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key');
-    Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key');
-    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key');
+    Config::set('services.midtrans.server_key', 'TEST_ONLY_SERVER_KEY');
+    Config::set('services.midtrans.client_key', 'TEST_ONLY_CLIENT_KEY');
+    Config::set('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY');
     Config::set('services.midtrans.is_production', false);
     Config::set('services.midtrans.subscription_api_url', 'https://api.sandbox.midtrans.com/v1/subscriptions');
     Http::preventStrayRequests();

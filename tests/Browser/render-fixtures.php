@@ -30,7 +30,7 @@ $baseUrl = rtrim($argv[2] ?? 'http://127.0.0.1:8000', '/');
 
 URL::forceRootUrl($baseUrl);
 Config::set('app.url', $baseUrl);
-Config::set('services.midtrans.client_key', 'SB-Mid-client-SYNTHETIC-TEST');
+Config::set('services.midtrans.client_key', 'TEST_ONLY_CLIENT_KEY_BROWSER');
 Config::set('services.midtrans.is_production', false);
 
 Session::start();

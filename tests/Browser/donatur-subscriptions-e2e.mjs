@@ -166,7 +166,7 @@ async function runSuite() {
                 res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
                 res.end(`
                     window.MidtransNew3ds = {
-                        clientKey: 'SB-Mid-client-SYNTHETIC-TEST',
+                        clientKey: 'TEST_ONLY_CLIENT_KEY_BROWSER',
                         getCardToken: function(cardData, opts) {
                             opts.onSuccess({ token_id: 'synth-card-tok-e2e-001' });
                         },

@@ -20,9 +20,9 @@ beforeEach(function () {
         throw new \RuntimeException("SAFETY VIOLATION: Tests must run on wecare_testing, currently on {$dbName}");
     }
 
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-test-key-12345');
-    Config::set('services.midtrans.client_key', 'SB-Mid-client-test-key-12345');
-    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-signing-secret-test-key-67890');
+    Config::set('services.midtrans.server_key', 'TEST_ONLY_SERVER_KEY_12345');
+    Config::set('services.midtrans.client_key', 'TEST_ONLY_CLIENT_KEY_12345');
+    Config::set('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_67890');
     Config::set('services.midtrans.is_production', false);
     Config::set('services.midtrans.min_amount', 1000);
     Config::set('services.midtrans.subscription_api_url', 'https://api.sandbox.midtrans.com/v1/subscriptions');
@@ -391,7 +391,7 @@ test('provider API failure (500) returns safe error without exposing credentials
 
     $response->assertSessionHasErrors(['midtrans']);
     $errorMsg = session('errors')->first('midtrans');
-    expect($errorMsg)->not->toContain('SB-Mid-server');
+    expect($errorMsg)->not->toContain('TEST_ONLY_SERVER_KEY');
     expect($errorMsg)->not->toContain('12345');
     expect(Subscription::count())->toBe(0);
 });

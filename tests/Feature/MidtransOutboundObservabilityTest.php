@@ -35,9 +35,9 @@ beforeEach(function () {
     ]);
     Log::forgetChannel('midtrans_observability');
 
-    Config::set('services.midtrans.server_key', 'SB-Mid-server-SYNTHETIC-SECRET-KEY-999');
-    Config::set('services.midtrans.client_key', 'SB-Mid-client-SYNTHETIC-CLIENT-999');
-    Config::set('services.midtrans.signature_secret_key', 'SB-Mid-sig-SYNTHETIC-SECRET-111');
+    Config::set('services.midtrans.server_key', 'TEST_ONLY_SERVER_KEY_999');
+    Config::set('services.midtrans.client_key', 'TEST_ONLY_CLIENT_KEY_999');
+    Config::set('services.midtrans.signature_secret_key', 'TEST_ONLY_SIGNATURE_KEY_111');
     Config::set('services.midtrans.is_production', false);
     Config::set('services.midtrans.api_url', 'https://app.sandbox.midtrans.com/snap/v1');
     Config::set('services.midtrans.status_api_url', 'https://api.sandbox.midtrans.com/v2');
@@ -519,9 +519,9 @@ test('13. strict redaction check confirms zero secrets, tokens, URLs, guard owne
 
     $rawLog = file_get_contents($this->obsLogPath);
     $forbiddenStrings = [
-        'SB-Mid-server-SYNTHETIC-SECRET-KEY-999',
-        'SB-Mid-client-SYNTHETIC-CLIENT-999',
-        'SB-Mid-sig-SYNTHETIC-SECRET-111',
+        'TEST_ONLY_SERVER_KEY_999',
+        'TEST_ONLY_CLIENT_KEY_999',
+        'TEST_ONLY_SIGNATURE_KEY_111',
         'Basic ',
         'https://app.sandbox.midtrans.com',
         'https://api.sandbox.midtrans.com',
